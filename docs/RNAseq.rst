@@ -23,6 +23,20 @@ Task dependencies
 3. RUM (>= version 1.11) must be installed and the EXECUTABLE RUM_runner.pl must be on your PATH.
    If on Biowulf, this will NOT work with the installed version, since they have altered it to only run from a perl interpreter.
 
+Environment dependencies
+========================
+
+First, the CCR_NGS code base needs to be on your python path.
+For example:
+
+export PYTHONPATH=${PYTHONPATH}:/path/to/CCR_NGS/ccrngspy
+
+Next, you must use a 64-bit Java (specifically for running Picard with large amounts of memory).
+
+See http://biowulf.nih.gov/apps/picard.html for details.
+On Biowulf, this can be achieved by:
+
+export PATH=/usr/local/java64/latest/bin:$PATH
 
 Example Run
 -----------
