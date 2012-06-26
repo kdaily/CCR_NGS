@@ -20,6 +20,7 @@ import tempfile
 import shutil
 import time
 import logging
+import shlex
 
 from ccrngspy import utils
 
@@ -168,7 +169,8 @@ class PicardBase():
 
         logger.debug("cl = %s" % cl)
         
-        process = subprocess.Popen(cl, shell=True, stderr=subprocess.PIPE, stdout=subprocess.PIPE, cwd=output_dir)
+        ## process = subprocess.Popen(shlex.split(cl), shell=False, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, cwd=output_dir)
+        process = subprocess.Popen(shlex.split(cl), shell=False, stderr=subprocess.STDOUT, cwd=output_dir)
         stdouts, stderrs = process.communicate()
         rval = process.returncode
 
@@ -184,11 +186,12 @@ class PicardBase():
         return s, stdouts, rval  # sometimes s is an output
     
     def runPic(self, jar, cl):
+        """cl should be everything after the jar file name in the command
+        
         """
-        cl should be everything after the jar file name in the command
-        """
+        
         runme = ['java -Xmx%s' % self.opts.maxjheap]
-        runme.append(" -Djava.io.tmpdir='%s' " % self.opts.tmpdir)
+        runme.append("-Djava.io.tmpdir='%s' " % self.opts.tmpdir)
         runme.append('-jar %s' % jar)
         runme += cl
         s,stdouts,rval = self.runCL(cl=runme, output_dir=self.opts.outdir)
@@ -418,7 +421,7 @@ class PicardBase():
         parser.add_argument('-x', '--maxjheap', default='2g')
         parser.add_argument('-b', '--bisulphite', default='false')
         parser.add_argument('--sort_order', dest='sort_order', help='Sort order', default="coordinate", choices=["unsorted", "queryname", "coordinate"])
-        parser.add_argument('--tmpdir', default='/tmp')
+        parser.add_argument('--tmpdir', default='/tmp', help="Directory for temporary files")
         parser.add_argument('-j', '--jar', default='')    
         # parser.add_argument('--picard-cmd', default=None)
 
@@ -464,6 +467,19 @@ class PicardBase():
         collectrnaseqmetricsparser.add_argument('--stop_after', type=int, help='Stop after N reads [default: %(default)s]', default=0)
         collectrnaseqmetricsparser.set_defaults(func=collect_rnaseq_metrics)
 
+        # CollectInsertSizeMetrics
+        collectinsertsizemetricsparser = subparsers.add_parser("CollectInsertSizeMetrics", help="CollectInsertSizeMetrics help")
+        collectinsertsizemetricsparser.add_argument('--histogram_file', type=str, help='Output histogram file')
+
+        collectinsertsizemetricsparser.add_argument('--deviations', type=float, help='Generate mean, sd and plots by trimming the data down to MEDIAN + DEVIATIONS*MEDIAN_ABSOLUTE_DEVIATION.  [default: %(default)s]', default=10)
+        collectinsertsizemetricsparser.add_argument('--histogram_width', type=int, help='Histogram width [default: %(default)s]', default=None)
+        collectinsertsizemetricsparser.add_argument('--minimum_pct', type=float, help='Discard any data categories with fewer than this pct of overall reads [default: %(default)s]', default=0.05)
+        
+        collectinsertsizemetricsparser.add_argument('--metric_accumulation_level', type=str, help='The level(s) at which to accumulate metrics. [default: %(default)s]',
+                                                choices=["ALL_READS", "SAMPLE", "LIBRARY", "READ_GROUP"], default="SAMPLE")
+        collectinsertsizemetricsparser.add_argument('--stop_after', type=int, help='Stop after N reads [default: %(default)s]', default=0)
+        collectinsertsizemetricsparser.set_defaults(func=collect_insertsize_metrics)
+
         return parser
 
     def set_options(self, args):
@@ -499,7 +515,7 @@ def setup(args):
 
     args.tmp_fd, args.tempout = tempfile.mkstemp(dir=args.tmpdir, suffix=args.suff)
     
-    cl = ['VALIDATION_STRINGENCY=LENIENT',]
+    cl = ['VALIDATION_STRINGENCY=SILENT',]
 
     return (pic, args, cl)
 
@@ -563,6 +579,8 @@ def sort_sam(args, pic, cl):
     # sort order
     cl.append('SORT_ORDER=%s' % args.sort_order) 
 
+    logger.debug("Running SortSam...")
+
     args.stdouts, args.rval = pic.runPic(args.jar, cl)
     return args
     
@@ -623,7 +641,7 @@ def collect_rnaseq_metrics(args, pic, cl):
     # Gene annotations in refFlat format.
     cl.append('REF_FLAT=%s' % (args.ref_flat))
 
-    # Gene annotations in refFlat format.
+    # Reference sequence in FASTA format.
     cl.append('REFERENCE_SEQUENCE=%s' % (args.ref_file))
 
     # locations of rRNA seqs in genome in interval_list format.
@@ -653,8 +671,38 @@ def collect_rnaseq_metrics(args, pic, cl):
     args.stdouts, args.rval = pic.runPic(args.jar, cl)
     return args
 
+def collect_insertsize_metrics(args, pic, cl):
+    """Run CollectInsertSizeMetrics tool.
 
-        
+    http://picard.sourceforge.net/command-line-overview.shtml#CollectInsertSizeMetrics
+    
+    """
+
+    assert args.output, "Did not specify an output file, which is required."
+
+    # inputs
+    cl.append('INPUT=%s' % args.input)
+
+    # mean, sd, plots to account for anomolous values and chimeras
+    cl.append('DEVIATIONS=%s' % (args.deviations))
+
+    # Reference sequence in FASTA format.
+    cl.append('REFERENCE_SEQUENCE=%s' % (args.ref_file))
+
+    cl.append('HISTOGRAM_WIDTH=%d' % args.histogram_width)
+    cl.append('MINIMUM_PCT=%f' % args.minimum_pct)
+
+    cl.append('METRIC_ACCUMULATION_LEVEL=%s' % args.metric_accumulation_level)
+
+    cl.append('ASSUME_SORTED=%s' % (args.assumesorted.lower()))
+    cl.append('STOP_AFTER=%i' % (args.stop_after))
+
+    # outputs
+    cl.append('OUTPUT=%s' % args.output) 
+    cl.append('HISTOGRAM_FILE=%s' % args.histogram_file)
+
+    args.stdouts, args.rval = pic.runPic(args.jar, cl)
+    return args
     
 def __main__():
 
@@ -671,12 +719,6 @@ def __main__():
     args = parser.parse_args()
     args.func(args)
 
-    # # CollectInsertSizeMetrics
-    # parser.add_argument('', '--taillimit', default="0")
-    # parser.add_argument('', '--histwidth', default="0")
-    # parser.add_argument('', '--minpct', default="0.01")
-    # parser.add_argument('', '--malevel', default='')
-    # parser.add_argument('', '--deviations', default="0.0")
 
     # # CollectAlignmentSummaryMetrics
     # parser.add_argument('', '--maxinsert', default="20")
