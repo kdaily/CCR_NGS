@@ -60,9 +60,6 @@ with open(opts.sample_file, 'r') as samplefile:
     reader = csv.DictReader(samplefile, delimiter="\t")
     samples = list(reader)
 
-# setup fastqc specific params
-fastqc_task_params = fastqc_helpers.make_fastqc_param_list(samples=samples, config=config)
-
 # setup bowtie specific params
 bowtie_task_params = bowtie_helpers.make_bowtie_param_list(samples=samples, config=config, params=None)
 
@@ -71,7 +68,6 @@ bowtie_task_params = bowtie_helpers.make_bowtie_param_list(samples=samples, conf
 # begin tasks here
 #----------------------------------------------
 @follows(mkdir(config['general_params']['log_file_dir']),
-         mkdir(config['fastqc_params']['output_dir']),
          mkdir(config['bowtie_params']['output_dir']),
          mkdir(config['picard_params']['output_dir']))
 def run_mk_output_dir(input=None, output=None, params=None):
@@ -249,13 +245,12 @@ def run_it():
     
     Running in three stages to change number of concurrent processes.
     
-    1. Run the FastQC quality control, which can run on many machines at once.
-    2. Run Bowtie2 alignment.
-    3. Run CollectRNASeqMetrics etc, which are memory intensive.
+    1. Run Bowtie2 alignment.
+    2. Run CollectRNASeqMetrics etc, which are memory intensive.
     
     """
 
-    ## Set up directories, run FASTQC
+    ## Set up directories
     pipeline_run(job_list_runfast, multiprocess=20, logger=logger)
 
     ## Run Bowtie
