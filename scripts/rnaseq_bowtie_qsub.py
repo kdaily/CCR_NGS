@@ -109,6 +109,7 @@ def run_bowtie(input, output, params=None):
     bowtie_params['file1'] = input[0]
     bowtie_params['file2'] = input[1]
     bowtie_params['sample'] = params['sample']
+    bowtie_params['output'] = output
     
     cmdline = '--bowtie_index=%(bowtie_index)s -1 %(file1)s -2 %(file2)s -o %(output)s --threads=%(threads)s --other_params="%(other_params)s"' % bowtie_params
     bowtie_cmd = "python -m ccrngspy.tasks.Bowtie %s" % cmdline
