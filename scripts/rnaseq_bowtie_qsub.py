@@ -14,9 +14,9 @@ import argparse
 import csv
 import sys
 import os
-import argparse
 import subprocess
 import time
+import shlex
 
 from ruffus import *
 import yaml
@@ -81,7 +81,11 @@ def run_mk_output_dir(input=None, output=None, params=None):
         # Make Bowtie output directory for each sample
         for sample in samples:
             sample_output_dir = os.path.join(config['bowtie_params']['output_dir'], sample['samplename'])
-            os.mkdir(sample_output_dir)
+
+            try:
+                os.mkdir(sample_output_dir)
+            except OSError:
+                logger.debug("Directory already exists, continuing.")
 
 @follows(run_mk_output_dir)
 @files(bowtie_task_params)
@@ -110,20 +114,35 @@ def run_bowtie(input, output, params=None):
     bowtie_params['file2'] = input[1]
     bowtie_params['sample'] = params['sample']
     bowtie_params['output'] = output
+
+    logger.debug('bowtie_params = %s' % (bowtie_params, ))
     
     cmdline = '--bowtie_index=%(bowtie_index)s -1 %(file1)s -2 %(file2)s -o %(output)s --threads=%(threads)s --other_params="%(other_params)s"' % bowtie_params
-    bowtie_cmd = "python -m ccrngspy.tasks.Bowtie %s" % cmdline
-    
-    logger.debug("params = %s" % (params, ))
+    # bowtie_cmd = "python -m ccrngspy.tasks.Bowtie %s" % cmdline
+
+    args = parser.parse_args(shlex.split(cmdline))
+    logger.debug("cmdline = %s" % (shlex.split(cmdline), ))
+
+
+    bowtie.set_options(args)
     
     bowtie_command = bowtie.make_command()
     
-    job_stdout, job_stderr = utils.safe_qsub_run(bowtie_command, jobname="bowtie_%s" % params['sample'],
-                                                 nodes=bowtie_params['qsub_nodes'],
-                                                 params="-v np=%(threads)s" % bowtie_params,
-                                                 stdout=stdout, stderr=stderr)
+    logger.debug("cmd = %s" % (bowtie_command, ))
+    logger.debug("params = %s" % (params, ))
     
-    logger.debug("stdout = %s, stderr = %s" % (job_stdout, job_stderr))
+    # job_stdout, job_stderr = utils.safe_qsub_run(bowtie_command, jobname="bowtie_%s" % params['sample'],
+    #                                              nodes=bowtie_params['qsub_nodes'],
+    #                                              params="-v np=%(threads)s" % bowtie_params,
+    #                                              stdout=stdout, stderr=stderr)
+    # logger.debug("stdout = %s, stderr = %s" % (job_stdout, job_stderr))
+
+    job_stdout = utils.safe_qsub_run(bowtie_command, jobname="bowtie_%s" % params['sample'],
+                                     nodes=bowtie_params['qsub_nodes'],
+                                     params="-v np=%(threads)s" % bowtie_params,
+                                     stdout=stdout, stderr=stderr)
+    
+    logger.debug("stdout = %s" % (job_stdout))
 
 @transform(run_bowtie, regex(r"(.*).sam"), r"\1.sorted.sam")
 def run_sort_sam(input, output, params=None):
@@ -257,8 +276,8 @@ def run_it():
     ## Run Bowtie
     pipeline_run(job_list_bowtie, multiprocess=3, logger=logger)
 
-    ## Run sorting, collecting RNASeq metrics
-    pipeline_run(job_list_rest, multiprocess=2, logger=logger)
+    # ## Run sorting, collecting RNASeq metrics
+    # pipeline_run(job_list_rest, multiprocess=2, logger=logger)
 
 def _keep_alive():
     """Do something easy so that any task-killing program thinks that I am still alive!
