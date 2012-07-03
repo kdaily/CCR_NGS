@@ -13,7 +13,7 @@ def make_bowtie_param_list(samples, config, params=None):
 
     Needs to be a list of [[input1, input2], output, params]; for the fastqc script.
 
-    The output is the file RUM.sam.
+    The output is the file bowtie2.sam.
 
     while the params are taken from the global opts variable
     (and possibly from the YAML config file).
@@ -24,7 +24,7 @@ def make_bowtie_param_list(samples, config, params=None):
 
     fastq_dir = config['general_params']['fastq_input_dir']
     log_dir = config['general_params']['log_file_dir']
-    rum_dir = config['bowtie_params']['output_dir']
+    bowtie_dir = config['bowtie_params']['output_dir']
 
     
     for sample in samples:
