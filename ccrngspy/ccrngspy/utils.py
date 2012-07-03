@@ -49,12 +49,16 @@ def safe_qsub_run(cmd, jobname, script_header=_script_header, nodes=1, params=""
     
     qsub_cmd = "%(cmd)s %(script)s" % dict(cmd=qsub_cmd, script=scriptfile.name)
 
-    proc = subprocess.Popen(qsub_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    so, se = proc.communicate()
-    jobid = so.rstrip()
+    # proc = subprocess.Popen(qsub_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # so, se = proc.communicate()
+
+    proc = subprocess.Popen(shlex.split(qsub_cmd), shell=False, stderr=subprocess.STDOUT, stdout=subprocess.PIPE)
+    stdouts, stderrs = proc.communicate()
+
+    jobid = stdouts.rstrip()
     scriptfile.close()
 
-    return jobid, se
+    return jobid#, stderrs
 
 _LOGGING_LEVEL = {'debug': logging.DEBUG,
                   'info': logging.INFO,
