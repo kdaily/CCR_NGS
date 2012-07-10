@@ -52,11 +52,11 @@ parser.add_argument("--no_output_dir", dest="no_create_output_dir", action="stor
 opts = parser.parse_args()
 
 # Load the bootstrap config file
-with open(opts.config_file, 'r') as configfile:
+with open(os.path.abspath(opts.config_file), 'r') as configfile:
     config = yaml.load(configfile)
 
 # Load the samples tab-separated file
-with open(opts.sample_file, 'r') as samplefile:
+with open(os.path.abspath(opts.sample_file), 'r') as samplefile:
     reader = csv.DictReader(samplefile, delimiter="\t")
     samples = list(reader)
 
@@ -185,11 +185,11 @@ def run_sort_sam(input, output, params=None):
     # logger.debug("stdout = %s, err = %s" % (stdout, stderr))
     
     logger.debug("params = %s" % (params, ))
-    job_stdout, job_stderr = utils.safe_qsub_run(picard_cmd, jobname="sort_sam",
-                                                 nodes=picard_params['qsub_nodes'],
-                                                 stdout=stdout, stderr=stderr)
+    job_stdout = utils.safe_qsub_run(picard_cmd, jobname="sort_sam",
+                                     nodes=picard_params['qsub_nodes'],
+                                     stdout=stdout, stderr=stderr)
     
-    logger.debug("stdout = %s, stderr = %s" % (job_stdout, job_stderr))
+    logger.debug("stdout = %s" % (job_stdout))
 
 @transform(run_sort_sam, regex(r".*/(.*)/bowtie2.sorted.sam"), r"%s/\1.tsv" % config['picard_params']['output_dir'], r"\1")
 def run_collect_rnaseq_metrics(input, output, sample):
@@ -230,11 +230,11 @@ def run_collect_rnaseq_metrics(input, output, sample):
     # stdout, stderr = utils.safe_run(picard_cmd, shell=False)
     # logger.debug("stdout = %s, err = %s" % (stdout, stderr))
 
-    job_stdout, job_stderr = utils.safe_qsub_run(picard_cmd, jobname="sort_%s" % sample,
-                                                 nodes=picard_params['qsub_nodes'],
-                                                 stdout=stdout, stderr=stderr)
+    job_stdout = utils.safe_qsub_run(picard_cmd, jobname="rnaseqmet_%s" % sample,
+                                     nodes=picard_params['qsub_nodes'],
+                                     stdout=stdout, stderr=stderr)
     
-    logger.debug("stdout = %s, stderr = %s" % (job_stdout, job_stderr))
+    logger.debug("stdout = %s" % (job_stdout))
 
 @merge(run_collect_rnaseq_metrics, os.path.join(config["picard_params"]["output_dir"], "CollectRNASeqMetrics.tsv"))
 def run_merge_rnaseq_metrics(input_files, summary_file):
@@ -274,10 +274,10 @@ def run_it():
     pipeline_run(job_list_runfast, multiprocess=20, logger=logger)
 
     ## Run Bowtie
-    pipeline_run(job_list_bowtie, multiprocess=3, logger=logger)
+    pipeline_run(job_list_bowtie, multiprocess=8, logger=logger)
 
-    # ## Run sorting, collecting RNASeq metrics
-    # pipeline_run(job_list_rest, multiprocess=2, logger=logger)
+    ## Run sorting, collecting RNASeq metrics
+    pipeline_run(job_list_rest, multiprocess=4, logger=logger)
 
 def _keep_alive():
     """Do something easy so that any task-killing program thinks that I am still alive!
