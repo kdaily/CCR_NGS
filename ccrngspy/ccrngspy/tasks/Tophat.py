@@ -30,8 +30,6 @@ class TophatRunner(Task.Task):
         self.threads = threads
         self.other_params = other_params
         
-        logger.debug("After init, mate_file_one = %s, mate_file_two = %s" % (self.mate_file_one, self.mate_file_two))
-
     def argparse(self, parser):
         """Add Tophat option group to an OptionParser.
         
