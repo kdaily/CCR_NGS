@@ -8,15 +8,20 @@ def safe_run(cmd, shell=False):
     proc = None
 
     if (isinstance(cmd, list)):
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     else:
         if shell:
-            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         else:
-            proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    so, se = proc.communicate()
+            proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
-    return (so, se)
+    while True:
+        std_output = proc.stdout.readline()
+        print std_output.rstrip()
+
+    so = proc.communicate()
+
+    return (so)
 
 # Could have these in the header too
 # #PBS -N %(jobname)s
