@@ -20,13 +20,13 @@ class RUMrunner(Task.Task):
     
     _cmd = "RUM_runner.pl"
     
-    _opt_lookup = dict(output_directory="-o %s",
-                       threads="-t %s",
-                       casava="--casava")
+    # _opt_lookup = dict(output_directory="-o %s",
+    #                    threads="-t %s",
+    #                    casava="--casava")
     
-    def __init__(self, config_file=None, name=None, input_file_list=None, output_directory=None, chunks=1, ram=6):
+    def __init__(self, config=None, name=None, input_file_list=None, output_directory=None, chunks=1, ram=6):
 
-        self.config_file = config_file
+        self.config = config
         self.name = name
 
         self.input_file_list = input_file_list
@@ -41,7 +41,7 @@ class RUMrunner(Task.Task):
         """
 
         group = parser.add_argument_group("FastQC Options")
-        group.add_argument("--rum_config_file", dest="rum_config_file", type=str, default=None,
+        group.add_argument("--rum_config", type=str, default=None,
                            help="RUM configuration file.")
         group.add_argument("--rum_run_name", dest="rum_run_name", type=str, default=None,
                            help="RUM run name.")
@@ -61,7 +61,7 @@ class RUMrunner(Task.Task):
 
         """
         
-        self.__init__(config_file=args.rum_config_file,
+        self.__init__(config=args.rum_config,
                       name=args.rum_run_name,
                       input_file_list=args.rum_read_files,
                       output_directory=args.rum_output_directory,
@@ -72,8 +72,8 @@ class RUMrunner(Task.Task):
     def make_command(self):
         _cmd_string = "%(prog)s %(config)s %(files)s %(outputdir)s %(chunks)s %(name)s -ram %(ram)s"
 
-        if self.input_file_list and self.name and self.config_file:
-            cmd = _cmd_string % dict(prog=self._cmd, config=self.config_file,
+        if self.input_file_list and self.name and self.config:
+            cmd = _cmd_string % dict(prog=self._cmd, config=self.config,
                                      files=",,,".join(self.input_file_list),
                                      outputdir=self.output_directory,
                                      chunks=self.chunks,
@@ -97,6 +97,31 @@ class RUMrunner(Task.Task):
         cmd = self.make_command()
         utils.safe_run(cmd, shell=False)
 
+class RUMrunner2(RUMrunner):
+    """Container for RUM tasks usign version 2.
+    
+    """
+    
+    _cmd = "/usr/local/RUM-Pipeline-v2.0.1_01/bin/rum_runner"
+    
+    def make_command(self):
+        _cmd_string = "%(prog)s align --name %(name)s --chunks %(chunks)s -i %(config)s -o %(outputdir)s %(files)s"
+
+        if self.input_file_list and self.name and self.config:
+            cmd = _cmd_string % dict(prog=self._cmd,
+                                     config= self.config,
+                                     files=" ".join(self.input_file_list),
+                                     outputdir=self.output_directory,
+                                     chunks=self.chunks,
+                                     name=self.name)
+        else:
+            raise ValueError("Did not specify any input files!")
+
+        logger.debug("Command to run: %s" % (cmd, ))
+
+        return cmd
+
+        
 def main():    
     _test()
 

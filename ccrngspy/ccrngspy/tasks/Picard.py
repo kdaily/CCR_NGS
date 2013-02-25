@@ -412,7 +412,7 @@ class PicardBase():
 
     def argparse(self, parser):
         # All tools
-        parser.add_argument('-i', '--input', dest='input', help='Input SAM or BAM file', type=str)
+        parser.add_argument('-i', '--input', dest='input', help='Input SAM or BAM file', nargs="+", type=str)
         parser.add_argument('-e', '--inputext', default=None, type=str)
         parser.add_argument('-o', '--output', default=None, type=str)
         parser.add_argument('-n', '--title', default="Pick a Picard Tool", type=str)
@@ -446,13 +446,20 @@ class PicardBase():
 
         # MarkDuplicates
         markdupparser = subparsers.add_parser("MarkDuplicates", help="MarkDuplicates help")
-        markdupparser.add_argument('--remdups', default='true', help='Remove duplicates from output file')
+        markdupparser.add_argument('--metrics_file', help='The path to the metrics file to write out')
+        markdupparser.add_argument('--remdups', default='false', help='Remove duplicates from output file')
         markdupparser.add_argument('--optdupdist', default="100", help='Maximum pixels between two identical sequences in order to consider them optical duplicates.')
         markdupparser.set_defaults(func=mark_duplicates)
 
         # SortSam
         sortsamparser = subparsers.add_parser("SortSam", help="SortSam help")
         sortsamparser.set_defaults(func=sort_sam)
+
+        # MergeSamFiles
+        mergesamfilesparser = subparsers.add_parser("MergeSamFiles", help="SortSam help")
+        mergesamfilesparser.add_argument('--use_threading', type=str, default='true')
+
+        mergesamfilesparser.set_defaults(func=merge_sam)
 
         # CollectRnaSeqMetrics
         collectrnaseqmetricsparser = subparsers.add_parser("CollectRnaSeqMetrics", help="CollectRNASeqMetrics help")
@@ -554,10 +561,11 @@ def mark_duplicates(args, pic, cl):
     # assume sorted even if header says otherwise
     cl.append('ASSUME_SORTED=%s' % (args.assumesorted))
     # input
-    cl.append('INPUT=%s' % args.input)
+    for input_file in args.input:
+        cl.append('INPUT=%s' % input_file)
     # outputs
     cl.append('OUTPUT=%s' % args.output) 
-    cl.append('METRICS_FILE=%s' % pic.metricsOut)
+    cl.append('METRICS_FILE=%s' % args.metrics_file)
     # remove or mark duplicates
     cl.append('REMOVE_DUPLICATES=%s' % args.remdups)
     # the regular expression to be used to parse reads in incoming SAM file
@@ -571,7 +579,8 @@ def mark_duplicates(args, pic, cl):
 def sort_sam(args, pic, cl):
 
     # input
-    cl.append('INPUT=%s' % args.input)
+    for input_file in args.input:
+        cl.append('INPUT=%s' % input_file)
 
     # outputs
     cl.append('OUTPUT=%s' % args.output) 
@@ -583,7 +592,31 @@ def sort_sam(args, pic, cl):
 
     args.stdouts, args.rval = pic.runPic(args.jar, cl)
     return args
-    
+
+@setup_and_cleanup
+def merge_sam(args, pic, cl):
+
+    # assume sorted even if header says otherwise
+    cl.append('ASSUME_SORTED=%s' % (args.assumesorted))
+
+    # assume sorted even if header says otherwise
+    cl.append('USE_THREADING=%s' % (args.use_threading))
+
+    # input
+    for input_file in args.input:
+        cl.append('INPUT=%s' % input_file)
+
+    # outputs
+    cl.append('OUTPUT=%s' % args.output) 
+
+    # sort order
+    cl.append('SORT_ORDER=%s' % args.sort_order) 
+
+    logger.debug("Running MergeSamFiles...")
+
+    args.stdouts, args.rval = pic.runPic(args.jar, cl)
+    return args
+
     # cleanup(args, pic, rval, stdouts)
 
 # @setup_and_cleanup
@@ -636,7 +669,8 @@ def collect_rnaseq_metrics(args, pic, cl):
     assert args.output, "Did not specify an output file, which is required."
 
     # inputs
-    cl.append('INPUT=%s' % args.input)
+    for input_file in args.input:
+        cl.append('INPUT=%s' % input_file)
 
     # Gene annotations in refFlat format.
     cl.append('REF_FLAT=%s' % (args.ref_flat))
@@ -681,7 +715,8 @@ def collect_insertsize_metrics(args, pic, cl):
     assert args.output, "Did not specify an output file, which is required."
 
     # inputs
-    cl.append('INPUT=%s' % args.input)
+    for input_file in args.input:
+        cl.append('INPUT=%s' % input_file)
 
     # mean, sd, plots to account for anomolous values and chimeras
     cl.append('DEVIATIONS=%s' % (args.deviations))
