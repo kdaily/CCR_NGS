@@ -14,18 +14,18 @@ import argparse
 import csv
 import sys
 import os
-import argparse
 import subprocess
 import time
+import shlex
 
 from ruffus import *
 import yaml
 
 from ccrngspy.tasks import FastQC
 from ccrngspy.tasks import Picard
-from ccrngspy.tasks import RUM
+from ccrngspy.tasks import Tophat
 from ccrngspy.pipeline import fastqc_helpers
-from ccrngspy.pipeline import rum_helpers
+from ccrngspy.pipeline import tophat_helpers
 from ccrngspy.pipeline import picard_helpers
 from ccrngspy import utils
 
@@ -52,39 +52,22 @@ parser.add_argument("--no_output_dir", dest="no_create_output_dir", action="stor
 opts = parser.parse_args()
 
 # Load the bootstrap config file
-with open(opts.config_file, 'r') as configfile:
+with open(os.path.abspath(opts.config_file), 'r') as configfile:
     config = yaml.load(configfile)
 
 # Load the samples tab-separated file
-with open(opts.sample_file, 'r') as samplefile:
+with open(os.path.abspath(opts.sample_file), 'r') as samplefile:
     reader = csv.DictReader(samplefile, delimiter="\t")
     samples = list(reader)
 
-# setup fastqc specific params
-fastqc_task_params = fastqc_helpers.make_fastqc_param_list(samples=samples, config=config)
-
-# setup rum specific params
-rum_task_params = rum_helpers.make_rum_param_list(samples=samples, config=config, params=None)
+# setup tophat specific params
+tophat_task_params = tophat_helpers.make_tophat_param_list(samples=samples, config=config, params=None)
 
 #----------------------------------------------
 # begin tasks here
 #----------------------------------------------
-
-# @follows(mkdir(config['general_params']['log_file_dir']),
-#          mkdir(config['fastqc_params']['output_dir']),
-#          mkdir(config['rum_params']['output_dir']),
-#          mkdir(config['picard_params']['output_dir']))
-# def run_setup_dir(input=None, output=None, params=None):
-#     """Make high level output directories.
-
-#     """
-    
-#     pass
-
-# @follows(run_setup_dir)
 @follows(mkdir(config['general_params']['log_file_dir']),
-         mkdir(config['fastqc_params']['output_dir']),
-         mkdir(config['rum_params']['output_dir']),
+         mkdir(config['tophat_params']['output_dir']),
          mkdir(config['picard_params']['output_dir']))
 def run_mk_output_dir(input=None, output=None, params=None):
     """Make output directories for each sample.
@@ -94,105 +77,73 @@ def run_mk_output_dir(input=None, output=None, params=None):
     """
     
     if not opts.no_create_output_dir:
-        # Make RUM output directory for each sample
+        # Make Tophat output directory for each sample
         for sample in samples:
-            sample_output_dir = os.path.join(config['rum_params']['output_dir'], sample['samplename'])
-            os.mkdir(sample_output_dir)
+            sample_output_dir = os.path.join(config['tophat_params']['output_dir'], sample['samplename'])
+
+            try:
+                os.mkdir(sample_output_dir)
+            except OSError:
+                logger.debug("Directory already exists, continuing.")
 
 @follows(run_mk_output_dir)
-@files(fastqc_task_params)
-def run_fastqc(input, output, params=None):
-    """Set up and run fastqc.
-    
-    """
-
-    # Let a parser argument handle setting up arguments and options
-    parser = argparse.ArgumentParser()
-    
-    # Add FastQC arguments
-    fastqc = FastQC.FastQC()
-    parser = fastqc.argparse(parser)
-    
-    # Update input and output from global config object
-    fastqc_params = config['fastqc_params']
-    fastqc_params['input'] = input
-
-    # Output dir for qsub stdout and stderr
-    stdout = config['general_params']['log_file_dir']
-    stderr = config['general_params']['log_file_dir']
-    
-    cmdline = "--outdir=%(output_dir)s --threads=%(threads)s %(input)s" % fastqc_params
-
-    args = parser.parse_args(cmdline.split())
-    fastqc.set_options(args)
-
-    # Final command to run
-    fastqc_command = fastqc.make_command()
-    
-    # if fastqc_params['run_type'] == 'remote':
-    #     stdout, stderr = utils.safe_qsub_run(fastqc_command, jobname="run_fastqc")
-    # elif fastqc_params['run_type'] == 'local':
-    job_stdout, job_stderr = utils.safe_qsub_run(fastqc_command, jobname="fastqc",
-                                                 nodes=fastqc_params['qsub_nodes'],
-                                                 stdout=stdout, stderr=stderr)
-    
-    logger.debug("stdout = %s, stderr = %s" % (job_stdout, job_stderr))
-
-    # post task, touch output file!
-    of = file(output, mode="w")
-    of.close()
-
-@follows(run_mk_output_dir)
-@files(rum_task_params)
-def run_rum(input, output, params=None):
-    """Run RUM on paired reads.
+@files(tophat_task_params)
+def run_tophat(input, output, params=None):
+    """Run Tophat on paired reads.
     
     """
     
     # Let a parser argument handle setting up arguments and options
     parser = argparse.ArgumentParser()
     
-    # Add RUM arguments
-    rum = RUM.RUMrunner()
-    parser = rum.argparse(parser)
+    # Add Tophat arguments
+    tophat = Tophat.TophatRunner()
+    parser = tophat.argparse(parser)
     
     # Update input and output from global config object
-    rum_params = config['rum_params']
-    rum_params['input'] = input
+    tophat_params = config['tophat_params']
+    tophat_params['input'] = input
 
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['log_file_dir']
     stderr = config['general_params']['log_file_dir']
 
     ## fastq read files
-    rum_params['file1'] = input[0]
-    rum_params['file2'] = input[1]
-    rum_params['sample'] = params['sample']
+    tophat_params['file1'] = input[0]
+    tophat_params['file2'] = input[1]
+    tophat_params['sample'] = params['sample']
+    tophat_params['output'] = output
+
+    logger.debug('tophat_params = %s' % (tophat_params, ))
+
+    cmdline = '--bowtie_index=%(bowtie_index)s -1 %(file1)s -2 %(file2)s -o %(output)s --threads=%(threads)s --other_params="%(other_params)s"' % tophat_params    
+    # tophat_cmd = "python -m ccrngspy.tasks.Tophat %s" % cmdline
+
+    args = parser.parse_args(shlex.split(cmdline))
+    logger.debug("cmdline = %s" % (shlex.split(cmdline), ))
+
+
+    tophat.set_options(args)
     
-    cmdline = "--rum_config_file=%(config_file)s --rum_run_name=%(sample)s --rum_outdir=%(output_dir)s/%(sample)s --rum_read_files %(file1)s %(file2)s --rum_chunks=%(chunks)s --rum_ram=%(ram_per_chunk)s" % rum_params
-    args = parser.parse_args(cmdline.split())
-
-    rum.set_options(args)
+    tophat_command = tophat.make_command()
     
-    rum_command = rum.make_command()
+    logger.debug("cmd = %s" % (tophat_command, ))
+    logger.debug("params = %s" % (params, ))
+    
+    # job_stdout, job_stderr = utils.safe_qsub_run(tophat_command, jobname="tophat_%s" % params['sample'],
+    #                                              nodes=tophat_params['qsub_nodes'],
+    #                                              params="-v np=%(threads)s" % tophat_params,
+    #                                              stdout=stdout, stderr=stderr)
+    # logger.debug("stdout = %s, stderr = %s" % (job_stdout, job_stderr))
 
-    # stdout, stderr = utils.safe_run(rum_command, shell=False)
-    # logger.debug("stdout = %s, err = %s" % (stdout, stderr))
-
-    job_stdout = utils.safe_qsub_run(rum_command, jobname="rum_%s" % params['sample'],
-                                     nodes=rum_params['qsub_nodes'], params="-l walltime=168:00:00",
+    job_stdout = utils.safe_qsub_run(tophat_command, jobname="tophat_%s" % params['sample'],
+                                     nodes=tophat_params['qsub_nodes'],
+                                     params="-v np=%(threads)s" % tophat_params,
                                      stdout=stdout, stderr=stderr)
     
     logger.debug("stdout = %s" % (job_stdout))
 
-# def run_gsnap(input, output, params=None):
-#     """Run gsnap.
-    
-#     """
-
-#     pass
-
-@transform(run_rum, regex(r"(.*).sam"), r"\1.sorted.sam")
+@transform(run_tophat, regex(r"(.*).sam"), r"\1.sorted.sam")
 def run_sort_sam(input, output, params=None):
     """Set up and run the Picard SortSam program.
 
@@ -239,7 +190,7 @@ def run_sort_sam(input, output, params=None):
     
     logger.debug("stdout = %s" % (job_stdout))
 
-@transform(run_sort_sam, regex(r".*/(.*)/RUM.sorted.sam"), r"%s/\1.tsv" % config['picard_params']['output_dir'], r"\1")
+@transform(run_sort_sam, regex(r".*/(.*)/tophat2.sorted.sam"), r"%s/\1.tsv" % config['picard_params']['output_dir'], r"\1")
 def run_collect_rnaseq_metrics(input, output, sample):
     """Set up and run the Picard CollectRnaSeqMetrics program.
 
@@ -304,29 +255,24 @@ def run_merge_rnaseq_metrics(input_files, summary_file):
         dw.writeheader()
         dw.writerows(metrics)
 
-job_list_runfast = [run_mk_output_dir, run_fastqc]
-job_list_rum = [run_rum]
-job_list_rest = [run_sort_sam, run_collect_rnaseq_metrics, run_merge_rnaseq_metrics]
+job_list_runfast = [run_mk_output_dir]
+job_list_rest = [run_tophat, run_sort_sam, run_collect_rnaseq_metrics, run_merge_rnaseq_metrics]
 
 def run_it():
     """Run the pipeline.
     
     Running in three stages to change number of concurrent processes.
     
-    1. Run the FastQC quality control, which can run on many machines at once.
-    2. Run RUM alignment, which can only run on the large memory machine. It would seem that PBS would be smart enough to set the available memory so that concurrent jobs wouldn't happen?
-    3. Run CollectRNASeqMetrics etc, which are memory intensive but not as much as RUM.
+    1. Run Tophat2 alignment.
+    2. Run CollectRNASeqMetrics etc, which are memory intensive.
     
     """
 
-    ## Set up directories, run FASTQC
+    ## Set up directories
     pipeline_run(job_list_runfast, multiprocess=20, logger=logger)
-
-    ## Run RUM
-    pipeline_run(job_list_rum, multiprocess=1, logger=logger)
-
-    ## Run sorting, collecting RNASeq metrics
-    pipeline_run(job_list_rest, multiprocess=2, logger=logger)
+    
+    ## Run Tophat, sorting, collecting RNASeq metrics
+    pipeline_run(job_list_rest, multiprocess=10, logger=logger)
 
 def _keep_alive():
     """Do something easy so that any task-killing program thinks that I am still alive!

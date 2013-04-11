@@ -257,8 +257,7 @@ def run_merge_rnaseq_metrics(input_files, summary_file):
         dw.writerows(metrics)
 
 job_list_runfast = [run_mk_output_dir]
-job_list_bowtie = [run_bowtie]
-job_list_rest = [run_sort_sam, run_collect_rnaseq_metrics, run_merge_rnaseq_metrics]
+job_list_rest = [run_bowtie, run_sort_sam, run_collect_rnaseq_metrics, run_merge_rnaseq_metrics]
 
 def run_it():
     """Run the pipeline.
@@ -272,12 +271,9 @@ def run_it():
 
     ## Set up directories
     pipeline_run(job_list_runfast, multiprocess=20, logger=logger)
-
-    ## Run Bowtie
-    pipeline_run(job_list_bowtie, multiprocess=8, logger=logger)
-
-    ## Run sorting, collecting RNASeq metrics
-    pipeline_run(job_list_rest, multiprocess=4, logger=logger)
+    
+    ## Run Bowtie, sorting, collecting RNASeq metrics
+    pipeline_run(job_list_rest, multiprocess=10, logger=logger)
 
 def _keep_alive():
     """Do something easy so that any task-killing program thinks that I am still alive!

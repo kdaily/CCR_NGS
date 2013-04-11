@@ -83,7 +83,6 @@ rum_task_params = rum_helpers.make_rum_param_list(samples=samples, config=config
 
 # @follows(run_setup_dir)
 @follows(mkdir(config['general_params']['log_file_dir']),
-         mkdir(config['fastqc_params']['output_dir']),
          mkdir(config['rum_params']['output_dir']),
          mkdir(config['picard_params']['output_dir']))
 def run_mk_output_dir(input=None, output=None, params=None):
@@ -98,49 +97,6 @@ def run_mk_output_dir(input=None, output=None, params=None):
         for sample in samples:
             sample_output_dir = os.path.join(config['rum_params']['output_dir'], sample['samplename'])
             os.mkdir(sample_output_dir)
-
-@follows(run_mk_output_dir)
-@files(fastqc_task_params)
-def run_fastqc(input, output, params=None):
-    """Set up and run fastqc.
-    
-    """
-
-    # Let a parser argument handle setting up arguments and options
-    parser = argparse.ArgumentParser()
-    
-    # Add FastQC arguments
-    fastqc = FastQC.FastQC()
-    parser = fastqc.argparse(parser)
-    
-    # Update input and output from global config object
-    fastqc_params = config['fastqc_params']
-    fastqc_params['input'] = input
-
-    # Output dir for qsub stdout and stderr
-    stdout = config['general_params']['log_file_dir']
-    stderr = config['general_params']['log_file_dir']
-    
-    cmdline = "--outdir=%(output_dir)s --threads=%(threads)s %(input)s" % fastqc_params
-
-    args = parser.parse_args(cmdline.split())
-    fastqc.set_options(args)
-
-    # Final command to run
-    fastqc_command = fastqc.make_command()
-    
-    # if fastqc_params['run_type'] == 'remote':
-    #     stdout, stderr = utils.safe_qsub_run(fastqc_command, jobname="run_fastqc")
-    # elif fastqc_params['run_type'] == 'local':
-    job_stdout, job_stderr = utils.safe_qsub_run(fastqc_command, jobname="fastqc",
-                                                 nodes=fastqc_params['qsub_nodes'],
-                                                 stdout=stdout, stderr=stderr)
-    
-    logger.debug("stdout = %s, stderr = %s" % (job_stdout, job_stderr))
-
-    # post task, touch output file!
-    of = file(output, mode="w")
-    of.close()
 
 @follows(run_mk_output_dir)
 @files(rum_task_params)
@@ -239,74 +195,10 @@ def run_sort_sam(input, output, params=None):
     
     logger.debug("stdout = %s" % (job_stdout))
 
-@transform(run_sort_sam, regex(r".*/(.*)/RUM.sorted.sam"), r"%s/\1.tsv" % config['picard_params']['output_dir'], r"\1")
-def run_collect_rnaseq_metrics(input, output, sample):
-    """Set up and run the Picard CollectRnaSeqMetrics program.
 
-    This task works differently than the others; instead of calling the program directly
-    by writing out the command line string needed to run it, this runs a python script
-    by calling the main function of ccrngspy.tasks.Picard. This is because the Picard code
-    is based off of the Galaxy wrapper for Picard, and doesn't work exactly the same as the
-    rest.
-
-    2012-03-30 I will consider re-writing it so that it is consistent. (dailykm)
-
-    """
-    
-    # # Let a parser argument handle setting up arguments and options
-    # parser = argparse.ArgumentParser()
-    
-    # Output dir for qsub stdout and stderr
-    stdout = config['general_params']['log_file_dir']
-    stderr = config['general_params']['log_file_dir']
-
-    # Update input and output from global config object
-    picard_params = config['picard_params']
-    picard_params['input'] = input
-    picard_params['output'] = output
-    
-    # Set up using the default arguments, specifying the input and output files since they are required!
-    cmdline = "--maxjheap=%(maxjheap)s --jar=%(jar_file)s --input=%(input)s --output=%(output)s --ref_flat=%(ref_flat)s --ref_file=%(ref_file)s CollectRnaSeqMetrics --minimum_length=%(minimum_length)s --chart_output=%(chart_output)s --metric_accumulation_level=%(metric_accumulation_level)s --stop_after=%(stop_after)s" % picard_params
-
-    # args = parser.parse_args(cmdline.split())
-    
-    # # Run the function for collecting RNASeq metrics
-    # args.func(args)
-    
-    picard_cmd = "python -m ccrngspy.tasks.Picard %s" % cmdline
-
-    # stdout, stderr = utils.safe_run(picard_cmd, shell=False)
-    # logger.debug("stdout = %s, err = %s" % (stdout, stderr))
-
-    job_stdout = utils.safe_qsub_run(picard_cmd, jobname="rnaseqmet_%s" % sample,
-                                     nodes=picard_params['qsub_nodes'],
-                                     stdout=stdout, stderr=stderr)
-    
-    logger.debug("stdout = %s" % (job_stdout))
-
-@merge(run_collect_rnaseq_metrics, os.path.join(config["picard_params"]["output_dir"], "CollectRNASeqMetrics.tsv"))
-def run_merge_rnaseq_metrics(input_files, summary_file):
-    """Merge the outputs of collectrnaseqmetrics into one tab-separated file.
-
-    """
-
-    metrics = []
-  
-    for fn in input_files:
-        ## Only take the first non-comment line; there is some histogram data after it!
-   
-        metrics.extend(picard_helpers.parse_picard_rnaseq_metrics(fn)[0:1])
-
-    fieldnames = metrics[0].keys()
-    
-    with open(summary_file, 'w') as fou:
-        dw = csv.DictWriter(fou, delimiter='\t', fieldnames=fieldnames)
-        dw.writeheader()
-        dw.writerows(metrics)
-
-job_list_runfast = [run_mk_output_dir, run_fastqc]
+job_list_runfast = [run_mk_output_dir]
 job_list_rum = [run_rum]
-job_list_rest = [run_sort_sam, run_collect_rnaseq_metrics, run_merge_rnaseq_metrics]
+job_list_rest = [run_sort_sam]
 
 def run_it():
     """Run the pipeline.
