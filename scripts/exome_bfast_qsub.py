@@ -46,9 +46,6 @@ parser.add_argument('--sample_file', dest="sample_file", type=str,
 parser.add_argument("--print_only", dest="print_only", action="store_true", default=False,
                     help="Don't run the pipeline, just print what will be run.")
 
-parser.add_argument("--no_output_dir", dest="no_create_output_dir", action="store_true", default=False,
-                    help="Don't recreate the output dirs.")
-
 # add options for the fastqc task
 # parser = FastQC.FastQC().argparse(parser)
 
@@ -66,7 +63,7 @@ with open(opts.sample_file, 'r') as samplefile:
 
 
 ## Only this sample should run
-runthesesamples = ['MN24', 'MT24', 'MN23', 'MT23', 'MN22', 'MT22', 'MN21', 'MT21', 'MN20', 'MT20', 'MN19', 'MT19']
+runthesesamples = ['MN01', 'MT01', 'MN02', 'MT02', 'MN06', 'MT06', 'MN07', 'MT07', 'MN12', 'MT12', 'MN17', 'MT17']
 samples = [x for x in samples if x['sample_name'] in runthesesamples]
     
 # setup inital run params
@@ -121,16 +118,19 @@ def run_sickle(input, output, params=None):
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "%(exec)s pe -t sanger -l %(length)s -q %(quality)s -f %(input_read1)s -r %(input_read2)s -o %(output_read1)s -p %(output_read2)s -s %(output)s" % params
+    # Modules to load
+    
+    cmd = ("module load %(modules)s\n"
+           "%(exec)s pe -t sanger -l %(length)s -q %(quality)s -f %(input_read1)s -r %(input_read2)s -o %(output_read1)s -p %(output_read2)s -s %(output)s" % params)
     
     logger.debug("cmd = %s" % (cmd,))
-
+    
     job_id = utils.safe_qsub_run(cmd, jobname="sickle",
                                  nodes=params['qsub_nodes'],
                                  stdout=stdout, stderr=stderr)
     
     logger.debug("job_id = %s" % (job_id,))
-
+    
 @jobs_limit(40)
 @follows(run_sickle)
 @transform(sickle_gzip_file_list, regex(r".*/(.*).fastq"), r"%s/\1.fastq.gz" % config['sickle_params']['output_dir'])
@@ -138,10 +138,10 @@ def run_gzip_sickle(input, output, params=None):
     """Gzip output of sickle files (required for fastqc parsing.)
     
     """
-
+    
     # Update input and output from global config object
     params = config['sickle_params']
-
+    
     params['input'] = input
     params['output'] = output
 
@@ -152,7 +152,7 @@ def run_gzip_sickle(input, output, params=None):
     cmd = "gzip %(input)s" % params
     
     logger.debug("cmd = %s" % (cmd,))
-
+    
     job_id = utils.safe_qsub_run(cmd, jobname="gzipsickle",
                                  nodes=params['qsub_nodes'],
                                  stdout=stdout, stderr=stderr)
@@ -164,23 +164,23 @@ def run_gzip_sickle(input, output, params=None):
 @collate(merge_fastq_file_list, regex(r".*/(.*)_(R[12])_(.*).fastq.gz"), r"%s/\1_\3.fastq.gz" % config['merge_paired_reads_params']['output_dir'])
 def run_merge_paired_reads(input, output, params=None):
     """Merge R1 and R2 ends into interleaving file for bfast to work on.
-
+    
     """
-
+    
     # Update input and output from global config object
     params = config['merge_paired_reads_params']
     input = sorted(input)
     params['input_read1'] = input[0]
     params['input_read2'] = input[1]
     params['output'] = output
-
+    
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir'] 
     
     cmd = "python %(exec)s --gzipped -1 %(input_read1)s -2  %(input_read2)s | gzip -c > %(output)s" % params
     # cmd = "python %(exec)s -1 %(input_read1)s -2  %(input_read2)s | gzip -c > %(output)s" % params
-
+    
     logger.debug("cmd = %s" % (cmd,))
 
     job_id = utils.safe_qsub_run(cmd, jobname="mergepairs",
@@ -190,45 +190,54 @@ def run_merge_paired_reads(input, output, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 @jobs_limit(30)
-@follows(run_merge_paired_reads, mkdir(config['bfast_match_params']['output_dir']))
+@follows(run_merge_paired_reads, 
+         mkdir(config['bfast_params']['output_dir']),
+         mkdir(config['bfast_match_params']['output_dir']))
 @files(bfast_match_task_params)
 def run_bfast_match(input, output, params=None):
     """Run match.
     
     """
-
-    # params = dict(sample_name=sample_name, ref_index=ref_index)
     
     # Let a parser argument handle setting up arguments and options
     parser = argparse.ArgumentParser()
     
     # Add BFAST arguments
     bfast = BFAST.BFASTBase()
+    
+    # Use bfast provided by PATH; set using the module functions.
+    bfast.set_exec("bfast")
+    
     parser = bfast.argparse(parser)
     
     # Update input and output from global config object
     bfast_params = config['bfast_match_params']
     bfast_params['input'] = input
     bfast_params['output'] = output
-
+    
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
-
+    
     bfast_params['sample'] = params['sample_name']
     bfast_params['bfast_ref_index'] = params['bfast_ref_index']
-
-    cmdline = "--bfast_temp_dir=%(temp_dir)s --bfast_threads=%(threads)s --bfast_reference_fasta=%(reference_fasta)s --bfast_output_file=%(output)s match --bfast_gzipped --bfast_reads_file=%(input)s --bfast_space=0 --bfast_main_indexes=%(bfast_ref_index)s" % bfast_params
-
+    
+    cmdline = ("--bfast_temp_dir=%(temp_dir)s --bfast_threads=%(threads)s "
+               "--bfast_reference_fasta=%(reference_fasta)s "
+               "--bfast_output_file=%(output)s match --bfast_gzipped "
+               "--bfast_reads_file=%(input)s --bfast_space=0 "
+               "--bfast_main_indexes=%(bfast_ref_index)s" % bfast_params)
+    
     args = parser.parse_args(cmdline.split(" "))
     
-    bfast_command = bfast.make_match_command(args)
-
+    bfast_command = "module load %(modules)s\n"  % bfast_params
+    bfast_command += bfast.make_match_command(args)
+    
     logger.debug("cmd = %s" % (bfast_command,))
-
+    
     # stdout, stderr = utils.safe_run(bfast_command, shell=False)
     # logger.debug("stdout = %s, err = %s" % (stdout, stderr))
-
+    
     job_id = utils.safe_qsub_run(bfast_command, jobname="bfmatch",
                                  nodes=bfast_params['qsub_nodes'],
                                  stdout=stdout, stderr=stderr)
@@ -253,7 +262,8 @@ def run_merge_bfastmatch(input, output, sample_name=None, index=None):
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "%(exec)s %(input)s > %(output)s" % merge_params
+    cmd = ("module load %(modules)s\n"
+           "%(exec)s %(input)s > %(output)s" % merge_params)
 
     job_id = utils.safe_qsub_run(cmd, jobname="mergebfmatch",
                                  nodes=merge_params['qsub_nodes'],
@@ -278,6 +288,10 @@ def run_bfast_localalign(input, output, sample_name=None, index=None):
     
     # Add BFAST arguments
     bfast = BFAST.BFASTBase()
+
+    # Use bfast provided by PATH; set using the module functions.
+    bfast.set_exec("bfast")
+
     parser = bfast.argparse(parser)
     
     # Update input and output from global config object
@@ -289,12 +303,15 @@ def run_bfast_localalign(input, output, sample_name=None, index=None):
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-
-    cmdline = "--bfast_threads=%(threads)s --bfast_reference_fasta=%(reference_fasta)s --bfast_output_file=%(output)s localalign --bfast_match_file=%(input)s" % bfast_params
+    cmdline = ("--bfast_threads=%(threads)s "
+               "--bfast_reference_fasta=%(reference_fasta)s "
+               "--bfast_output_file=%(output)s localalign "
+               "--bfast_match_file=%(input)s" % bfast_params)
 
     args = parser.parse_args(cmdline.split(" "))
     
-    bfast_command = bfast.make_localalign_command(args)
+    bfast_command = "module load %(modules)s\n" % bfast_params
+    bfast_command += bfast.make_localalign_command(args)
 
     # stdout, stderr = utils.safe_run(bfast_command, shell=False)
     # logger.debug("stdout = %s, err = %s" % (stdout, stderr))
@@ -322,6 +339,10 @@ def run_bfast_postprocess(input, output, flowcell_id=None, sample_name=None, ind
     
     # Add BFAST arguments
     bfast = BFAST.BFASTBase()
+
+    # Use bfast provided by PATH; set using the module functions.
+    bfast.set_exec("bfast")
+
     parser = bfast.argparse(parser)
     
     # Update input and output from global config object
@@ -342,11 +363,15 @@ def run_bfast_postprocess(input, output, flowcell_id=None, sample_name=None, ind
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
     
-    cmdline = "--bfast_threads=%(threads)s --bfast_output_file=%(output)s --bfast_reference_fasta=%(reference_fasta)s postprocess --bfast_read_group_string=%(read_group_string)s --bfast_aligned_file=%(input)s" % bfast_params
+    cmdline = ("--bfast_threads=%(threads)s --bfast_output_file=%(output)s "
+               "--bfast_reference_fasta=%(reference_fasta)s postprocess "
+               "--bfast_read_group_string=%(read_group_string)s "
+               "--bfast_aligned_file=%(input)s" % bfast_params)
 
     args = parser.parse_args(cmdline.split(" "))
     
-    bfast_command = bfast.make_postprocess_command(args)
+    bfast_command ="module load %(modules)s\n" % bfast_params
+    bfast_command += bfast.make_postprocess_command(args)
 
     # stdout, stderr = utils.safe_run(bfast_command, shell=False)
     # logger.debug("stdout = %s, err = %s" % (stdout, stderr))
@@ -505,7 +530,9 @@ def run_indexbam(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
-@follows(run_mk_output_dir, mkdir(config['gatk_realigner_target_creator_params']['output_dir']))
+@follows(run_mk_output_dir,
+         mkdir(config['gatk_params']['output_dir']),
+         mkdir(config['gatk_realigner_target_creator_params']['output_dir']))
 @files(config['gatk_realigner_target_creator_params']['reference_fasta'], config['gatk_realigner_target_creator_params']['output_file'])
 def run_realign_indel_creator(input, output, params=None):
     """First part of GATK recalibration.
@@ -679,13 +706,14 @@ def run_index_splitbam(input, output, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 
+@jobs_limit(2)
 @follows(run_index_splitbam)
 @follows(run_split_bam, mkdir(config['mutect_params']['output_dir']))
 @collate(run_split_bam, regex(r".*/(.*)_(M[NT])(.*)\.bam"),
-         r"%s/\1_\3.callstats" % config['mutect_params']['output_dir'],  
-         r"%s/\1_\3_coverage.wig" % config['mutect_params']['output_dir'],
+         r"%s/\1_\3.txt" % config['mutect_params']['output_dir'],
+         # r"%s/\1_\3_coverage.wig" % config['mutect_params']['output_dir'],
          r"%s/\1_\3.vcf" % config['mutect_params']['output_dir'])
-def run_mutect(input, output, coverage_file, vcf_file, params=None):
+def run_mutect(input, output, vcf_file, params=None):
     """Run mutect.
 
     """
@@ -701,19 +729,22 @@ def run_mutect(input, output, coverage_file, vcf_file, params=None):
     params['input_tumor'] = input[1]
 
     params['call_stats_file'] = output
-    params['coverage_file'] = coverage_file
+    ## params['coverage_file'] = coverage_file
     params['vcf_file'] = vcf_file
-    
+
+    params['log_file'] =  config['mutect_params']['output_dir']
+
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "%(java_exec)s -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s --analysis_type MuTect --dbsnp %(dbsnp_file)s --cosmic %(cosmic_file)s --input_file:normal %(input_normal)s --input_file:tumor %(input_tumor)s --reference_sequence %(reference_fasta)s --out %(call_stats_file)s --coverage_file %(coverage_file)s --vcf %(vcf_file)s --enable_extended_output -nt %(threads)s" % params
+    cmd = "%(java_exec)s -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s --analysis_type MuTect --dbsnp %(dbsnp_file)s --cosmic %(cosmic_file)s --input_file:normal %(input_normal)s --input_file:tumor %(input_tumor)s --reference_sequence %(reference_fasta)s --out %(call_stats_file)s --vcf %(vcf_file)s --enable_extended_output" % params
 
     logger.debug("cmd = %s" % (cmd,))
 
     job_id = utils.safe_qsub_run(cmd, jobname="mutect",
                                  nodes=params['qsub_nodes'],
+                                 params=params['qsub_params'],
                                  stdout=stdout, stderr=stderr)
     
     logger.debug("job_id = %s" % (job_id,))
