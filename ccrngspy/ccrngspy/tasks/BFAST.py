@@ -43,6 +43,13 @@ class BFASTBase(Task.Task):
         # pairing_options=None, scoring_matrix_file=None, insert_size_avg=None, insert_size_stdev=None):
 
 
+    def set_bfast_exec(self, cmd):
+        """Change the executable to use.
+
+        """
+
+        self._cmd = cmd
+
     def argparse(self, parser):
         """Add BFAST match option group to an OptionParser.
         
