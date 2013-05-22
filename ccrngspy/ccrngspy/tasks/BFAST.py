@@ -43,7 +43,7 @@ class BFASTBase(Task.Task):
         # pairing_options=None, scoring_matrix_file=None, insert_size_avg=None, insert_size_stdev=None):
 
 
-    def set_bfast_exec(self, cmd):
+    def set_exec(self, cmd):
         """Change the executable to use.
 
         """
