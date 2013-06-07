@@ -37,3 +37,19 @@ def make_fastqc_param_list(samples, config, params=None):
         final_list.extend([tmp1, tmp2])
 
     return final_list
+
+def make_fastqc_input_list(samples, config, params=None):
+    """Helper function to turn the sample file into a list of files.
+
+    Needs to be a list of [input]; for the fastqc script.
+    
+    """
+
+    final_list = []
+
+    fastq_dir = config['general_params']['fastq_input_dir']
+    
+    for sample in samples:
+        final_list.extend([os.path.join(fastq_dir, sample['filename1']), os.path.join(fastq_dir, sample['filename2'])])
+
+    return final_list

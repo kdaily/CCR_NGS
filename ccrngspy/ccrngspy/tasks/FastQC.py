@@ -80,7 +80,7 @@ class FastQC(Task.Task):
         else:
             raise ValueError("Did not specify any input files!")
         
-        logger.debug("Command to run: %s" % (cmd, ))
+        # logger.debug("Command to run: %s" % (cmd, ))
 
         return cmd
     

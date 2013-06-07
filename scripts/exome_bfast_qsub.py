@@ -63,8 +63,9 @@ with open(opts.sample_file, 'r') as samplefile:
 
 
 ## Only this sample should run
-runthesesamples = ['MN01', 'MT01', 'MN02', 'MT02', 'MN06', 'MT06', 'MN07', 'MT07', 'MN12', 'MT12', 'MN17', 'MT17']
-samples = [x for x in samples if x['sample_name'] in runthesesamples]
+if config['general_params']['samples_to_run']:
+    runthesesamples = config['general_params']['samples_to_run']
+    samples = [x for x in samples if x['sample_name'] in runthesesamples]
     
 # setup inital run params
 sickle_file_list = bfast_helpers.make_sickle_file_list(samples=samples, config=config, params=None)
@@ -93,10 +94,15 @@ def run_mk_output_dir(input=None, output=None, params=None):
 
 @jobs_limit(40)
 @follows(run_mk_output_dir, mkdir(config['sickle_params']['output_dir']))
-## @collate(sickle_file_list, regex(r".*/(M[NT]..)_(.*)_(R.)_(.*)\.fastq"), r"%s/\1_\2_\4.singles" % config['sickle_params']['output_dir'])
-@collate(sickle_file_list, regex(r".*/(M[NT]..)_(.*)_(R.)_(.*)\.fastq.gz"), r"%s/\1_\2_\4.singles" % config['sickle_params']['output_dir'])
+## @collate(sickle_file_list, regex(r".*/(M[NT]..)_(.*)_(R[12])_(.*)\.fastq"), r"%s/\1_\2_\4.singles" % config['sickle_params']['output_dir'])
+@collate(sickle_file_list, regex(r".*/(M[NT]..)_(.*)_(R.)_(.*)\.fastq.gz"),
+         [r"%s/\1_\2_R1_\4.fastq.gz" % config['sickle_params']['output_dir'],
+          r"%s/\1_\2_R2_\4.fastq.gz" % config['sickle_params']['output_dir'],
+          r"%s/\1_\2_\4.singles" % config['sickle_params']['output_dir']])
 def run_sickle(input, output, params=None):
     """Run sickle to trim ends of reads based on sequence quality and length.
+    
+    Also gzips the output to save space.
     
     """
 
@@ -110,18 +116,18 @@ def run_sickle(input, output, params=None):
     params['input_read1_base'] = os.path.splitext(os.path.basename(input[0]))[0]
     params['input_read2_base'] = os.path.splitext(os.path.basename(input[1]))[0]
 
-    params['output_read1'] = "%(output_dir)s/%(input_read1_base)s" % (params)
-    params['output_read2'] = "%(output_dir)s/%(input_read2_base)s" % (params)
-    params['output'] = output
+    params['output_read1'] = output[0].split(".gz")[0] # "%(output_dir)s/%(input_read1_base)s" % (params)
+    params['output_read2'] = output[1].split(".gz")[0] # "%(output_dir)s/%(input_read1_base)s" % (params)
+    params['output_singles'] = output[2]
 
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    # Modules to load
-    
     cmd = ("module load %(modules)s\n"
-           "%(exec)s pe -t sanger -l %(length)s -q %(quality)s -f %(input_read1)s -r %(input_read2)s -o %(output_read1)s -p %(output_read2)s -s %(output)s" % params)
+           "%(exec)s pe -t sanger -l %(length)s -q %(quality)s -f %(input_read1)s -r %(input_read2)s -o %(output_read1)s -p %(output_read2)s -s %(output_singles)s\n"
+           "gzip %(output_read1)s\n" 
+           "gzip %(output_read2)s" % params)
     
     logger.debug("cmd = %s" % (cmd,))
     
@@ -131,36 +137,38 @@ def run_sickle(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
     
+# @jobs_limit(40)
+# @follows(run_sickle)
+# @transform(sickle_gzip_file_list, regex(r".*/(.*).fastq"), r"%s/\1.fastq.gz" % config['sickle_params']['output_dir'])
+# @posttask(touch_file("%s/gzip_sickle_completed.flag" % config['sickle_params']['output_dir']))
+# def run_gzip_sickle(input, output, params=None):
+#     """Gzip output of sickle files (required for fastqc parsing.)
+    
+#     """
+    
+#     # Update input and output from global config object
+#     params = config['sickle_params']
+    
+#     params['input'] = input
+#     params['output'] = output
+
+#     # Output dir for qsub stdout and stderr
+#     stdout = config['general_params']['stdout_log_file_dir']
+#     stderr = config['general_params']['stderr_log_file_dir']
+
+#     cmd = "gzip %(input)s" % params
+    
+#     logger.debug("cmd = %s" % (cmd,))
+    
+#     job_id = utils.safe_qsub_run(cmd, jobname="gzipsickle",
+#                                  nodes=params['qsub_nodes'],
+#                                  stdout=stdout, stderr=stderr)
+    
+#     logger.debug("job_id = %s" % (job_id,))
+
 @jobs_limit(40)
-@follows(run_sickle)
-@transform(sickle_gzip_file_list, regex(r".*/(.*).fastq"), r"%s/\1.fastq.gz" % config['sickle_params']['output_dir'])
-def run_gzip_sickle(input, output, params=None):
-    """Gzip output of sickle files (required for fastqc parsing.)
-    
-    """
-    
-    # Update input and output from global config object
-    params = config['sickle_params']
-    
-    params['input'] = input
-    params['output'] = output
-
-    # Output dir for qsub stdout and stderr
-    stdout = config['general_params']['stdout_log_file_dir']
-    stderr = config['general_params']['stderr_log_file_dir']
-
-    cmd = "gzip %(input)s" % params
-    
-    logger.debug("cmd = %s" % (cmd,))
-    
-    job_id = utils.safe_qsub_run(cmd, jobname="gzipsickle",
-                                 nodes=params['qsub_nodes'],
-                                 stdout=stdout, stderr=stderr)
-    
-    logger.debug("job_id = %s" % (job_id,))
-
-@jobs_limit(40)
-@follows(run_gzip_sickle, mkdir(config['merge_paired_reads_params']['output_dir']))
+# @follows(run_gzip_sickle, mkdir(config['merge_paired_reads_params']['output_dir']))
+@follows(run_sickle, mkdir(config['merge_paired_reads_params']['output_dir']))
 @collate(merge_fastq_file_list, regex(r".*/(.*)_(R[12])_(.*).fastq.gz"), r"%s/\1_\3.fastq.gz" % config['merge_paired_reads_params']['output_dir'])
 def run_merge_paired_reads(input, output, params=None):
     """Merge R1 and R2 ends into interleaving file for bfast to work on.
@@ -189,7 +197,7 @@ def run_merge_paired_reads(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
-@jobs_limit(30)
+@jobs_limit(10)
 @follows(run_merge_paired_reads, 
          mkdir(config['bfast_params']['output_dir']),
          mkdir(config['bfast_match_params']['output_dir']))
@@ -244,7 +252,7 @@ def run_bfast_match(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
-@jobs_limit(30)
+@jobs_limit(20)
 @follows(run_bfast_match, mkdir(config['bfast_mergematch_params']['output_dir']))
 @collate(run_bfast_match, regex(r".*/(.+)_(.+)_(.+)_(.+).bmf"), r"%s/\1_\2_\3.bmf" % config['bfast_mergematch_params']['output_dir'],
            r"\2", r"\3")
@@ -323,7 +331,10 @@ def run_bfast_localalign(input, output, sample_name=None, index=None):
     logger.debug("job_id = %s" % (job_id,))
 
 @jobs_limit(30)
-@follows(run_bfast_localalign, mkdir(config['bfast_postprocess_params']['output_dir']))
+@follows(run_bfast_localalign,
+         mkdir(config['bfast_postprocess_params']['output_dir']),
+         mkdir(config['bfast_postprocess_params']['scratch_dir']),
+         )
 @transform(run_bfast_localalign, regex(r".*/(.*)_(.*)_(.*).baf"), r"%s/\1_\2_\3.sam" % config['bfast_postprocess_params']['output_dir'],
            r"\1", r"\2", r"\3")
 @posttask(touch_file("%s/bfast_postprocess_completed.flag" % config['bfast_postprocess_params']['output_dir']))
@@ -417,6 +428,7 @@ def run_sort_sam(input, output, sample_name=None, index=None):
 
     logger.debug("job_id = %s" % (job_id,))
      
+@jobs_limit(20)
 @follows(run_sort_sam, mkdir(config['mergebam_params']['output_dir']))
 @collate(run_sort_sam, regex(r".*/(.+)_M.(.+)_(.+).bam"), r"%s/\1_\2.bam" % config['mergebam_params']['output_dir'],
          r"\2")
@@ -455,6 +467,8 @@ def run_mergebam(input, output, patient_id=None):
 
 #     pass
 
+@jobs_limit(20)
+@follows(run_mergebam, mkdir(config['picard_markduplicates_params']['output_dir']))
 @transform(run_mergebam, regex(r".*/(.*).bam"), r"%s/\1.bam" % config['picard_markduplicates_params']['output_dir'])
 def run_mark_duplicates(input, output, params=None):
     """Set up and run the Picard MarkDuplicates program.
@@ -502,6 +516,7 @@ def run_mark_duplicates(input, output, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 
+@jobs_limit(20)
 @transform(run_mark_duplicates, regex(r"(.*).bam"), r"\1.bam.bai")
 def run_indexbam(input, output, params=None):
     """Run samtools index on bam file.
@@ -530,10 +545,12 @@ def run_indexbam(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
+@jobs_limit(20)
 @follows(run_mk_output_dir,
          mkdir(config['gatk_params']['output_dir']),
          mkdir(config['gatk_realigner_target_creator_params']['output_dir']))
-@files(config['gatk_realigner_target_creator_params']['reference_fasta'], config['gatk_realigner_target_creator_params']['output_file'])
+@files(config['gatk_realigner_target_creator_params']['reference_fasta'], 
+       config['gatk_realigner_target_creator_params']['output_file'])
 def run_realign_indel_creator(input, output, params=None):
     """First part of GATK recalibration.
 
@@ -561,6 +578,7 @@ def run_realign_indel_creator(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
+@jobs_limit(20)
 @follows(run_indexbam, run_realign_indel_creator, mkdir(config['gatk_indel_realigner_params']['output_dir']))
 @transform(run_mark_duplicates, regex(r".*/(.*).bam"), r"%s/\1.bam" % config['gatk_indel_realigner_params']['output_dir'])
 def run_indel_realigner(input, output, params=None):
@@ -593,6 +611,7 @@ def run_indel_realigner(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
+@jobs_limit(20)
 @follows(run_indel_realigner, mkdir(config['gatk_base_score_recal_params']['output_dir']))
 @transform(run_indel_realigner, regex(r".*/(.*).bam"), r"%s/\1.grp" % config['gatk_base_score_recal_params']['output_dir'])
 def run_base_score_recalibrator(input, output, params=None):
@@ -624,8 +643,12 @@ def run_base_score_recalibrator(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
+@jobs_limit(20)
 @follows(run_base_score_recalibrator)
-@transform(run_indel_realigner, regex(r".*/(.*).bam"), r"%s/\1.bam" % config['gatk_base_score_recal_params']['output_dir'], r"%s/\1.grp" % config['gatk_base_score_recal_params']['output_dir'])
+@transform(run_indel_realigner, 
+           regex(r".*/(.*).bam"), 
+           r"%s/\1.bam" % config['gatk_base_score_recal_params']['output_dir'], 
+           r"%s/\1.grp" % config['gatk_base_score_recal_params']['output_dir'])
 def run_write_recalibrated_bam(input, output, bqsr_file, params=None):
     """GATK write BAM file with recalibrated base scores.
 
@@ -651,7 +674,12 @@ def run_write_recalibrated_bam(input, output, bqsr_file, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
-@split(run_write_recalibrated_bam, regex(r".*/(.+)_(.+).bam"), r'%s/\1_M[NT]\2.bam' % config['gatk_base_score_recal_params']['output_dir'])
+@jobs_limit(20)
+# # Can I do this?
+@split(run_write_recalibrated_bam, regex(r".*/(.+)_(.+).bam"),
+       [r'%s/\1_MN\2.bam' % config['gatk_base_score_recal_params']['output_dir'],
+        r'%s/\1_MT\2.bam' % config['gatk_base_score_recal_params']['output_dir']])
+# @split(run_write_recalibrated_bam, regex(r".*/(.+)_(.+).bam"), r'%s/\1_M[NT]\2.bam' % config['gatk_base_score_recal_params']['output_dir'])
 def run_split_bam(input, output, params=None):
     """Split BAM files into separate tumor/normal files based on read group.
 
@@ -677,6 +705,7 @@ def run_split_bam(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
+@jobs_limit(20)
 @transform(run_split_bam, regex(r"(.*).bam"), r"\1.bam.bai")
 def run_index_splitbam(input, output, params=None):
     """Run samtools index on bam file.
@@ -705,15 +734,13 @@ def run_index_splitbam(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
-
-@jobs_limit(2)
+@jobs_limit(5)
 @follows(run_index_splitbam)
 @follows(run_split_bam, mkdir(config['mutect_params']['output_dir']))
 @collate(run_split_bam, regex(r".*/(.*)_(M[NT])(.*)\.bam"),
-         r"%s/\1_\3.txt" % config['mutect_params']['output_dir'],
-         # r"%s/\1_\3_coverage.wig" % config['mutect_params']['output_dir'],
-         r"%s/\1_\3.vcf" % config['mutect_params']['output_dir'])
-def run_mutect(input, output, vcf_file, params=None):
+         r"%s/\1_\3.vcf" % config['mutect_params']['output_dir'],
+         r"%s/\1_\3.txt" % config['mutect_params']['output_dir'])
+def run_mutect(input, output, text_file, params=None):
     """Run mutect.
 
     """
@@ -728,9 +755,9 @@ def run_mutect(input, output, vcf_file, params=None):
     params['input_normal'] = input[0]
     params['input_tumor'] = input[1]
 
-    params['call_stats_file'] = output
+    params['vcf_file'] = output
+    params['call_stats_file'] = text_file
     ## params['coverage_file'] = coverage_file
-    params['vcf_file'] = vcf_file
 
     params['log_file'] =  config['mutect_params']['output_dir']
 
@@ -751,11 +778,28 @@ def run_mutect(input, output, vcf_file, params=None):
 
     
     
-job_list_runfast = [run_mk_output_dir, run_sickle, run_gzip_sickle, run_merge_paired_reads]
-job_list_bfast = [run_bfast_match, run_merge_bfastmatch, run_bfast_localalign, run_bfast_postprocess]
-job_list_postprocess = [run_sort_sam, run_mergebam, run_mark_duplicates, run_indexbam]
-job_list_GATK = [run_realign_indel_creator, run_indel_realigner, run_base_score_recalibrator, run_write_recalibrated_bam]
-job_list_mutations = [run_split_bam, run_mutect]
+job_list_runfast = [run_mk_output_dir,
+                    run_sickle,
+                    ## run_gzip_sickle,
+                    run_merge_paired_reads]
+
+job_list_bfast = [run_bfast_match,
+                  run_merge_bfastmatch,
+                  run_bfast_localalign,
+                  run_bfast_postprocess]
+
+job_list_postprocess = [run_sort_sam,
+                        run_mergebam,
+                        run_mark_duplicates,
+                        run_indexbam]
+
+job_list_GATK = [run_realign_indel_creator,
+                 run_indel_realigner,
+                 run_base_score_recalibrator,
+                 run_write_recalibrated_bam]
+
+job_list_mutations = [run_split_bam,
+                      run_mutect]
 
 job_list = job_list_runfast + job_list_bfast + job_list_postprocess + job_list_GATK + job_list_mutations
 
@@ -764,7 +808,7 @@ def run_it():
         
     """
     
-    pipeline_run(job_list, multiprocess=20, logger=logger)
+    pipeline_run(job_list, multiprocess=40, logger=logger, gnu_make_maximal_rebuild_mode=False)
     
     # ## Set up directories
     # pipeline_run(job_list_runfast, multiprocess=20, logger=logger)
