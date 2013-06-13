@@ -62,7 +62,7 @@ if config['general_params']['samples_to_run']:
     samples = [x for x in samples if x['sample_name'] in runthesesamples]
     
 # setup inital run params
-sickle_file_list = bfast_helpers.make_sickle_file_list(samples=samples, config=config, params=None)
+sickle_file_list = bwa_helpers.make_sickle_file_list(samples=samples, config=config, params=None)
 sickle_outputs = bwa_helpers.make_bwa_files(samples, config)
 
 @follows(mkdir(config['general_params']['stdout_log_file_dir']),
@@ -74,12 +74,14 @@ def run_mk_output_dir(input=None, output=None, params=None):
 
     pass
 
+# /data/dailykm/CSAS13444/fastq/D1JF9ACXX/merged/MN19_CAGATC_L002_R2.fastq.gz
+
 @jobs_limit(40)
 @follows(run_mk_output_dir, mkdir(config['sickle_params']['output_dir']))
-@collate(sickle_file_list, regex(r".*/(M[NT]..)_(.*)_(R.)_(.*)\.fastq.gz"),
-         [r"%s/\1_\2_R1_\4.fastq.gz" % config['sickle_params']['output_dir'],
-          r"%s/\1_\2_R2_\4.fastq.gz" % config['sickle_params']['output_dir']],
-         r"%s/\1_\2_\4.singles" % config['sickle_params']['output_dir'])
+@collate(sickle_file_list, regex(r".*/(M[NT]..)_(R.)\.fastq.gz"),
+         [r"%s/\1_R1.fastq.gz" % config['sickle_params']['output_dir'],
+          r"%s/\1_R2.fastq.gz" % config['sickle_params']['output_dir']],
+         r"%s/\1.singles" % config['sickle_params']['output_dir'])
 def run_sickle(input, output, output_singles, params=None):
     """Run sickle to trim ends of reads based on sequence quality and length.
     
@@ -107,8 +109,9 @@ def run_sickle(input, output, output_singles, params=None):
 
     cmd = ("module load %(modules)s\n"
            "%(exec)s pe -t sanger -l %(length)s -q %(quality)s -f %(input_read1)s -r %(input_read2)s -o %(output_read1)s -p %(output_read2)s -s %(output_singles)s\n"
-           "gzip %(output_read1)s\n" 
-           "gzip %(output_read2)s" % params)
+           "gzip %(output_read1)s &\n" 
+           "gzip %(output_read2)s &\n" 
+           "wait" % params)
     
     logger.debug("cmd = %s" % (cmd,))
     
@@ -119,38 +122,74 @@ def run_sickle(input, output, output_singles, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 @follows(run_sickle,
-         mkdir(config['bwa_params']['output_dir']))
+         mkdir(config['bwa_aln_params']['output_dir']))
 @collate(sickle_outputs,
-         regex(r".*/(.*)_(.*)_(.*)_(.*)_(.*).fastq.gz"), 
-         r"%s/\1_\4.sai" % config['bwa_params']['output_dir'])
-def run_bwa(input, output, params=None):
+         regex(r".*/(.*).fastq.gz"), 
+         r"%s/\1.sai" % config['bwa_aln_params']['output_dir'])
+def run_bwa_aln(input, output, params=None):
     """Run bwa on individual gzipped fastq files.
-
-    bwa aln -t 8 $ref $FQ1 >$workdir/${FQ3}_R1.sai &
 
     """
     
     # Update input and output from global config object
-    params = config['bwa_params']
+    params = config['bwa_aln_params']
     params['input'] = " ".join(input)
     params['output'] = output
     
     cmd = "module load %(modules)s\n" % params
-    cmd += "zcat %(input)s | bwa aln -t %(threads)s %(reference_fasta)s /dev/stdin > %(output)s.sai" % params
+    cmd += "bwa aln -t %(threads)s %(reference_fasta)s %(input)s > %(output)s" % params
 
-    logger.debug("cmd = %s" % (bfast_command,))
-    
+    logger.debug("cmd = %s" % (cmd))
+
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
     
-    job_id = utils.safe_qsub_run(cmd, jobname="bwa",
+    job_id = utils.safe_qsub_run(cmd, jobname="bwa_aln",
                                  nodes=params['qsub_nodes'],
                                  stdout=stdout, stderr=stderr)
     
     logger.debug("job_id = %s" % (job_id,))
 
-job_list = [run_mk_output_dir, run_bwa]
+@follows(run_bwa_aln,
+         mkdir(config['bwa_sampe_params']['output_dir']))
+@collate(run_bwa_aln,
+         regex(r".*/(.*)_(.*).sai"), 
+         add_inputs([r"%s/\1_R1.fastq.gz" % config['sickle_params']['output_dir'],
+                     r"%s/\1_R2.fastq.gz" % config['sickle_params']['output_dir']]),
+         r"%s/\1.sorted.bam" % config['bwa_sampe_params']['output_dir'],
+         r"\1")
+def run_bwa_sampe(input, output, sample_name, params=None):
+    """Run bwa sampe.
+
+
+    """
+    
+    # Update input and output from global config object
+    params = config['bwa_sampe_params']
+    
+    params['sai_R1'] = input[0][0]
+    params['sai_R2'] = input[1][0]
+    
+    (params['fastq_R1'], params['fastq_R2']) = input[0][1]
+        
+    params['read_group_string'] = bwa_helpers.sample_name_to_read_group_string(sample_name=sample_name, samples=samples, config=config)
+    cmd = "module load %(modules)s\n" % params
+    cmd = 'bwa sampe -r "%(read_group_string)s" %(reference_fasta)s %(sai_R1)s %(sai_R2)s %(fastq_R1)s %(fastq_R2)s | samtools view -Su - | samtools sort - -@ %(threads)s -f %(output)s' % params
+    
+    logger.debug("cmd = %s" % (cmd))
+    
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+    
+    job_id = utils.safe_qsub_run(cmd, jobname="bwa_sampe",
+                                 nodes=params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+    
+job_list = [run_mk_output_dir, run_bwa_aln, run_bwa_sampe]
 
 def run_it():
     """Run the pipeline.
