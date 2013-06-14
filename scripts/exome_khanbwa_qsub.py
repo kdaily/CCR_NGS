@@ -233,10 +233,6 @@ def run_indexbam1(input, output, params=None):
     """Run samtools index on bam file.
     
     """
-
-
-    # Let a parser argument handle setting up arguments and options
-    parser = argparse.ArgumentParser()
         
     # Update input and output from global config object
     params = config['bamindex_params']
@@ -260,8 +256,23 @@ def run_indexbam1(input, output, params=None):
 def run_cleansam(input, output):
     """Clean up BAM file.
     """
+
+    # Update input and output from global config object
+    params = config['cleansam_params']
+    params['input'] = input
+    params['output'] = output
+
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
     
-    cmd = "java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s INPUT=%(input)s OUTPUT=%(output)s"
+    cmd = "java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s INPUT=%(input)s OUTPUT=%(output)s" % params
+
+    job_id = utils.safe_qsub_run(cmd, jobname="cleansam",
+                                 nodes=params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
 
 @transform(run_cleansam, regex(r"(.*).bam"), r"\1.bam.bai")
 def run_indexbam2(input, output, params=None):
