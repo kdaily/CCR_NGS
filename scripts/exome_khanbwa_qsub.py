@@ -263,7 +263,7 @@ def run_cleansam(input, output):
     
     cmd = "java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s INPUT=%(input)s OUTPUT=%(output)s"
 
-job_list = [run_mk_output_dir, run_bwa_aln, run_bwa_sampe, run_indexbam1]
+job_list = [run_mk_output_dir, run_bwa_aln, run_bwa_sampe, run_indexbam1, run_cleansam]
 
 def run_it():
     """Run the pipeline.
