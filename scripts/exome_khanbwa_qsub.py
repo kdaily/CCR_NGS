@@ -249,21 +249,77 @@ def run_indexbam1(input, output, params=None):
 
     cmd = "samtools index %(input)s %(output)s" % params
 
-    job_id = utils.safe_qsub_run(cmd, jobname="bamindex",
+    job_id = utils.safe_qsub_run(cmd, jobname="bamindex1",
                                  nodes=params['qsub_nodes'],
                                  stdout=stdout, stderr=stderr)
     
     logger.debug("job_id = %s" % (job_id,))
 
 @follows(run_indexbam1)
-@transform(run_filterbam, regex(r"(.*).bam"), r"\1.clean.bam")
+@transform(run_filterbam, regex(r"(.*).sorted.filter.bam"), r"\1.bam")
 def run_cleansam(input, output):
     """Clean up BAM file.
     """
     
     cmd = "java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s INPUT=%(input)s OUTPUT=%(output)s"
 
-job_list = [run_mk_output_dir, run_bwa_aln, run_bwa_sampe, run_indexbam1, run_cleansam]
+@transform(run_cleansam, regex(r"(.*).bam"), r"\1.bam.bai")
+def run_indexbam2(input, output, params=None):
+    """Run samtools index on bam file.
+    
+    """
+
+
+    # Let a parser argument handle setting up arguments and options
+    parser = argparse.ArgumentParser()
+        
+    # Update input and output from global config object
+    params = config['bamindex_params']
+    params['input'] = input
+    params['output'] = output
+
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    cmd = "samtools index %(input)s %(output)s" % params
+
+    job_id = utils.safe_qsub_run(cmd, jobname="bamindex2",
+                                 nodes=params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+@follows(run_indexbam2)
+@transform(run_cleansam, regex(r"(.*).bam"), r"\1.flagstat.txt")
+def run_flagstat(input, output, params=None):
+    """Run samtools flagstat on bam file.
+    
+    """
+
+
+    # Let a parser argument handle setting up arguments and options
+    parser = argparse.ArgumentParser()
+        
+    # Update input and output from global config object
+    params = config['bamflagstat_params']
+    params['input'] = input
+    params['output'] = output
+
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    cmd = "samtools flagstat %(input)s > %(output)s" % params
+
+    job_id = utils.safe_qsub_run(cmd, jobname="flagstat",
+                                 nodes=params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+
+job_list = [run_mk_output_dir, run_bwa_aln, run_bwa_sampe, run_indexbam1, run_cleansam, run_flagstat]
 
 def run_it():
     """Run the pipeline.
