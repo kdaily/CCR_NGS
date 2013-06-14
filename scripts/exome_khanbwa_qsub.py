@@ -65,6 +65,8 @@ if config['general_params']['samples_to_run']:
 sickle_file_list = bwa_helpers.make_sickle_file_list(samples=samples, config=config, params=None)
 sickle_outputs = bwa_helpers.make_bwa_files(samples, config)
 
+print sickle_file_list
+
 @follows(mkdir(config['general_params']['stdout_log_file_dir']),
          mkdir(config['general_params']['stderr_log_file_dir']))
 def run_mk_output_dir(input=None, output=None, params=None):
@@ -158,8 +160,10 @@ def run_bwa_aln(input, output, params=None):
          add_inputs([r"%s/\1_R1.fastq.gz" % config['sickle_params']['output_dir'],
                      r"%s/\1_R2.fastq.gz" % config['sickle_params']['output_dir']]),
          r"%s/\1.sorted.bam" % config['bwa_sampe_params']['output_dir'],
-         r"\1")
-def run_bwa_sampe(input, output, sample_name, params=None):
+         r"\1.sorted",
+         r"\1",
+         )
+def run_bwa_sampe(input, output, output_prefix, sample_name, params=None):
     """Run bwa sampe.
 
 
@@ -170,12 +174,18 @@ def run_bwa_sampe(input, output, sample_name, params=None):
     
     params['sai_R1'] = input[0][0]
     params['sai_R2'] = input[1][0]
+
+    # For some reason, -f param didn't work with samtools sort
+    # So, need to use prefix verison (without bam suffix)
+    params['output'] = output_prefix
     
     (params['fastq_R1'], params['fastq_R2']) = input[0][1]
         
     params['read_group_string'] = bwa_helpers.sample_name_to_read_group_string(sample_name=sample_name, samples=samples, config=config)
     cmd = "module load %(modules)s\n" % params
-    cmd = 'bwa sampe -r "%(read_group_string)s" %(reference_fasta)s %(sai_R1)s %(sai_R2)s %(fastq_R1)s %(fastq_R2)s | samtools view -Su - | samtools sort - -@ %(threads)s -f %(output)s' % params
+    cmd = ('bwa sampe -r "%(read_group_string)s" %(reference_fasta)s %(sai_R1)s %(sai_R2)s %(fastq_R1)s %(fastq_R2)s | '
+           'samtools view -Su - | '
+           'samtools sort - -@ %(threads)s -f %(output)s' % params)
     
     logger.debug("cmd = %s" % (cmd))
     
@@ -188,8 +198,64 @@ def run_bwa_sampe(input, output, sample_name, params=None):
                                  stdout=stdout, stderr=stderr)
     
     logger.debug("job_id = %s" % (job_id,))
+
+@follows(run_bwa_sampe,
+         mkdir(config['bamfilter_params']['output_dir']))
+@transform(run_bwa_sampe, regex(r"(.*).bam"), r"\1.filter.bam")
+def run_filterbam(input, output):
+    """
     
-job_list = [run_mk_output_dir, run_bwa_aln, run_bwa_sampe]
+    """
+
+    # Update input and output from global config object
+    params = config['bamfilter_params']
+
+    params['input'] = input
+    params['output'] = output
+    
+    cmd = "module load %(modules)s\n" % params
+    cmd = "samtools view -h -F uUfd -q 1 -b %(input)s > %(output)s" % params
+    
+    logger.debug("cmd = %s" % (cmd))
+    
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+    
+    job_id = utils.safe_qsub_run(cmd, jobname="filterbam",
+                                 nodes=params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+@transform(run_filterbam, regex(r"(.*).bam"), r"\1.bam.bai")
+def run_indexbam1(input, output, params=None):
+    """Run samtools index on bam file.
+    
+    """
+
+
+    # Let a parser argument handle setting up arguments and options
+    parser = argparse.ArgumentParser()
+        
+    # Update input and output from global config object
+    params = config['params']
+    params['input'] = input
+    params['output'] = output
+
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    cmd = "samtools index %(input)s %(output)s" % params
+
+    job_id = utils.safe_qsub_run(cmd, jobname="bamindex",
+                                 nodes=params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+job_list = [run_mk_output_dir, run_bwa_aln, run_bwa_sampe, run_indexbam1]
 
 def run_it():
     """Run the pipeline.
