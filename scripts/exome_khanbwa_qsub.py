@@ -330,6 +330,39 @@ def run_flagstat(input, output, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 
+@jobs_limit(20)
+@follows(run_indexbam2, mkdir(config['mergebam_params']['output_dir']))
+@collate(run_cleansam, regex(r".*/M.(.+).bam"), r"%s/\1.bam" % config['mergebam_params']['output_dir'],
+         r"\1")
+def run_mergebam(input, output, patient_id=None):
+    """Merge all bam files for a single patient together (this includes matched tumor and normal into one file).
+    The separate tumor/normal sample info is encoded in the read groups of the BAM files.
+    This is done for future steps (GATK recommends that tumor/normal paired data is run through re-align/re-calibrate step together).
+    """
+    
+    params = dict(patient_id=patient_id)
+        
+    # Update input and output from global config object
+    mergebam_params = config['mergebam_params']
+    mergebam_params['input'] = " ".join(input)
+    mergebam_params['output'] = output
+
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    cmdline = "--maxjheap=%(maxjheap)s --jar=%(jar_file)s --input %(input)s --output=%(output)s --sort_order=%(sort_order)s MergeSamFiles --use_threading=true" % mergebam_params
+
+    cmd = "python -m ccrngspy.tasks.Picard %s" % cmdline
+    logger.debug("cmd = %s" % (cmd,))
+
+    job_id = utils.safe_qsub_run(cmd, jobname="mergebam%s" % (params['patient_id']),
+                                 nodes=mergebam_params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+
 job_list = [run_mk_output_dir, run_bwa_aln, run_bwa_sampe, run_indexbam1, run_cleansam, run_flagstat]
 
 def run_it():
