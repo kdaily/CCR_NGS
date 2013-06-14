@@ -239,7 +239,7 @@ def run_indexbam1(input, output, params=None):
     parser = argparse.ArgumentParser()
         
     # Update input and output from global config object
-    params = config['params']
+    params = config['bamindex_params']
     params['input'] = input
     params['output'] = output
 
