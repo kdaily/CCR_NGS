@@ -336,9 +336,6 @@ def run_flagstat(input, output, params=None):
            config['picard_markduplicates_params'])
 def run_mark_duplicates(input, output, params=None):
     """Set up and run the Picard MarkDuplicates program.
-
-
-    2012-03-30 I will consider re-writing it so that it is consistent. (dailykm)
     
     """
 
