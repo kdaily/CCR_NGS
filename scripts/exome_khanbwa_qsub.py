@@ -329,6 +329,54 @@ def run_flagstat(input, output, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
+@jobs_limit(20)
+@follows(run_cleansam, mkdir(config['picard_markduplicates_params']['output_dir']))
+@transform(run_cleansam, regex(r".*/(.*).bam"), r"%s/\1.bam" % config['picard_markduplicates_params']['output_dir'])
+def run_mark_duplicates(input, output, params=None):
+    """Set up and run the Picard MarkDuplicates program.
+
+
+    2012-03-30 I will consider re-writing it so that it is consistent. (dailykm)
+    
+    """
+    
+    # # Let a parser argument handle setting up arguments and options
+    # parser = argparse.ArgumentParser()
+    
+    # # Add Picard arguments
+    # picard = Picard.PicardBase()
+    # parser = picard.argparse(parser)
+
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    # Update input and output from global config object
+    picard_params = config['picard_markduplicates_params']
+
+    picard_params['input'] = input
+    picard_params['output'] = output
+    picard_params['metrics_file'] = "%s.metrics" % output
+
+    cmd = ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
+           "INPUT=%(input)s OUTPUT=%(output)s METRICS_FILE=%(metrics_file)s " 
+           "OPTICAL_DUPLICATE_PIXEL_DISTANCE=%(optical_duplicate_pixel_distance)s" % params)
+
+    # # Set up using the default arguments, specifying the input and output files since they are required!
+    # cmdline = "--maxjheap=%(maxjheap)s --jar=%(jar_file)s --input=%(input)s --output=%(output)s MarkDuplicates --metrics_file=%(metrics_file)s --optdupdist=%(optical_duplicate_pixel_distance)s " % picard_params
+
+    # picard_cmd = "python -m ccrngspy.tasks.Picard %s" % cmdline
+
+    # stdout, stderr = utils.safe_run(picard_cmd, shell=False)
+    # logger.debug("stdout = %s, err = %s" % (stdout, stderr))
+    
+    job_id = utils.safe_qsub_run(cmd, jobname="markdups",
+                                 nodes=picard_params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+
 
 @jobs_limit(20)
 @follows(run_indexbam2, mkdir(config['mergebam_params']['output_dir']))
