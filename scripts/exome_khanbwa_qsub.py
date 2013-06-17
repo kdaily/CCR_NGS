@@ -261,7 +261,9 @@ def run_cleansam(input, output):
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
     
-    cmd = "java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s INPUT=%(input)s OUTPUT=%(output)s" % params
+    cmd = "module load %(modules)s\n" % params
+    cmd += ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
+            "INPUT=%(input)s OUTPUT=%(output)s" % params)
 
     job_id = utils.safe_qsub_run(cmd, jobname="cleansam",
                                  nodes=params['qsub_nodes'],
@@ -468,18 +470,20 @@ def run_indel_realigner(input, output, params=None):
 
 @jobs_limit(20)
 @follows(run_indel_realigner, mkdir(config['gatk_base_score_recal_params']['output_dir']))
-@transform(run_indel_realigner, regex(r".*/(.*).bam"), r"%s/\1.grp" % config['gatk_base_score_recal_params']['output_dir'])
+@transform(run_indel_realigner, 
+           regex(r".*/(.*).bam"), 
+           r"%s/\1.grp" % config['gatk_base_score_recal_params']['output_dir'],
+           config['gatk_base_score_recal_params'])
 def run_base_score_recalibrator(input, output, params=None):
     """GATK base score recalibration.
 
     """
     
-    realign_params = config['gatk_base_score_recal_params']
-    realign_params['input'] = input
-    realign_params['output'] = output
+    params['input'] = input
+    params['output'] = output
 
     knowns = ""
-    for known in config['gatk_base_score_recal_params']['known_files']:
+    for known in params['known_files']: # config['gatk_base_score_recal_params']['known_files']:
         knowns += "-knownSites %s " % known
 
     realign_params['knowns'] = knowns
@@ -488,12 +492,14 @@ def run_base_score_recalibrator(input, output, params=None):
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s -T BaseRecalibrator -I %(input)s -R %(reference_fasta)s -o %(output)s %(knowns)s" % realign_params
+    cmd = "module load %(modules)s\n" % params
+    cmd += ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
+            "-T BaseRecalibrator -I %(input)s -R %(reference_fasta)s -o %(output)s %(knowns)s" % params)
 
     logger.debug("cmd = %s" % (cmd,))
 
     job_id = utils.safe_qsub_run(cmd, jobname="bsRecal",
-                                 nodes=realign_params['qsub_nodes'],
+                                 nodes=params['qsub_nodes'],
                                  stdout=stdout, stderr=stderr)
     
     logger.debug("job_id = %s" % (job_id,))
@@ -503,28 +509,31 @@ def run_base_score_recalibrator(input, output, params=None):
 @transform(run_indel_realigner, 
            regex(r".*/(.*).bam"), 
            r"%s/\1.bam" % config['gatk_base_score_recal_params']['output_dir'], 
-           r"%s/\1.grp" % config['gatk_base_score_recal_params']['output_dir'])
+           r"%s/\1.grp" % config['gatk_base_score_recal_params']['output_dir'],
+           config['gatk_base_score_recal_params'])
 def run_write_recalibrated_bam(input, output, bqsr_file, params=None):
     """GATK write BAM file with recalibrated base scores.
 
     """
     
-    recal_params = config['gatk_base_score_recal_params']
-    recal_params['input'] = input
-    recal_params['output'] = output
-    recal_params['bqsr_file'] = bqsr_file
+    params['input'] = input
+    params['output'] = output
+    params['bqsr_file'] = bqsr_file
     
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s -T PrintReads -I %(input)s -R %(reference_fasta)s -BQSR %(bqsr_file)s -o %(output)s" % recal_params
+    cmd = "module load %(modules)s\n" % params
+    cmd += ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
+            "-T PrintReads -I %(input)s -R %(reference_fasta)s -BQSR %(bqsr_file)s "
+            "-o %(output)s" % params)
 
     logger.debug("cmd = %s" % (cmd,))
 
     job_id = utils.safe_qsub_run(cmd, jobname="writerecal",
-                                 nodes=recal_params['qsub_nodes'],
-                                 # params=recal_params['qsub_params'],
+                                 nodes=params['qsub_nodes'],
+                                 # params=params['qsub_params'],
                                  stdout=stdout, stderr=stderr)
     
     logger.debug("job_id = %s" % (job_id,))
