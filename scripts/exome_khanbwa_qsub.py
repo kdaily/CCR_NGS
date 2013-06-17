@@ -263,7 +263,7 @@ def run_cleansam(input, output):
     
     cmd = "module load %(modules)s\n" % params
     cmd += ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
-            "INPUT=%(input)s OUTPUT=%(output)s" % params)
+            "INPUT=%(input)s OUTPUT=%(output)s CREATE_INDEX=true" % params)
 
     job_id = utils.safe_qsub_run(cmd, jobname="cleansam",
                                  nodes=params['qsub_nodes'],
@@ -271,31 +271,31 @@ def run_cleansam(input, output):
     
     logger.debug("job_id = %s" % (job_id,))
 
-@transform(run_cleansam,
-           regex(r"(.*).bam"), r"\1.bam.bai",
-           config['bamindex_params'])
-def run_indexbam2(input, output, params=None):
-    """Run samtools index on bam file.
+# @transform(run_cleansam,
+#            regex(r"(.*).bam"), r"\1.bam.bai",
+#            config['bamindex_params'])
+# def run_indexbam2(input, output, params=None):
+#     """Run samtools index on bam file.
     
-    """
+#     """
     
-    params['input'] = input
-    params['output'] = output
+#     params['input'] = input
+#     params['output'] = output
 
-    # Output dir for qsub stdout and stderr
-    stdout = config['general_params']['stdout_log_file_dir']
-    stderr = config['general_params']['stderr_log_file_dir']
+#     # Output dir for qsub stdout and stderr
+#     stdout = config['general_params']['stdout_log_file_dir']
+#     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "module load %(modules)s\n" % params
-    cmd += "samtools index %(input)s %(output)s" % params
+#     cmd = "module load %(modules)s\n" % params
+#     cmd += "samtools index %(input)s %(output)s" % params
 
-    job_id = utils.safe_qsub_run(cmd, jobname="bamindex2",
-                                 nodes=params['qsub_nodes'],
-                                 stdout=stdout, stderr=stderr)
+#     job_id = utils.safe_qsub_run(cmd, jobname="bamindex2",
+#                                  nodes=params['qsub_nodes'],
+#                                  stdout=stdout, stderr=stderr)
     
-    logger.debug("job_id = %s" % (job_id,))
+#     logger.debug("job_id = %s" % (job_id,))
 
-@follows(run_indexbam2)
+@follows(run_cleansam)
 @transform(run_cleansam,
            regex(r"(.*).bam"), r"\1.flagstat.txt",
            config['bamflagstat_params'])
@@ -321,9 +321,11 @@ def run_flagstat(input, output, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 @jobs_limit(20)
-@follows(run_cleansam, mkdir(config['picard_markduplicates_params']['output_dir']))
+@follows(run_cleansam, 
+         mkdir(config['picard_markduplicates_params']['output_dir']))
 @transform(run_cleansam, 
-           regex(r".*/(.*).bam"), r"%s/\1.bam" % config['picard_markduplicates_params']['output_dir'],
+           regex(r".*/(.*).bam"),
+           r"%s/\1.bam" % config['picard_markduplicates_params']['output_dir'],
            config['picard_markduplicates_params'])
 def run_mark_duplicates(input, output, params=None):
     """Set up and run the Picard MarkDuplicates program.
@@ -343,7 +345,7 @@ def run_mark_duplicates(input, output, params=None):
 
     cmd = "module load %(modules)s\n" % params
     cmd += ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
-            "INPUT=%(input)s OUTPUT=%(output)s METRICS_FILE=%(metrics_file)s " 
+            "INPUT=%(input)s OUTPUT=%(output)s METRICS_FILE=%(metrics_file)s CREATE_INDEX=true" 
             "OPTICAL_DUPLICATE_PIXEL_DISTANCE=%(optical_duplicate_pixel_distance)s" % params)
     
     job_id = utils.safe_qsub_run(cmd, jobname="markdups",
@@ -379,7 +381,8 @@ def run_mergebam(input, output, patient_id=None, params=None):
 
     cmd = "module load %(modules)s\n" % params
     cmd += ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
-            "INPUT=%(input)s OUTPUT=%(output)s SORT_ORDER=%(sort_order)s USE_THREADING=true " % params)
+            "INPUT=%(input)s OUTPUT=%(output)s SORT_ORDER=%(sort_order)s "
+            "USE_THREADING=true CREATE_INDEX=true" % params)
 
     # cmdline = "--maxjheap=%(maxjheap)s --jar=%(jar_file)s --input %(input)s --output=%(output)s --sort_order=%(sort_order)s MergeSamFiles --use_threading=true" % mergebam_params
     # cmd = "python -m ccrngspy.tasks.Picard %s" % cmdline
