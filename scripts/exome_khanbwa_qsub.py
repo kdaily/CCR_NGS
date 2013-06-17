@@ -83,17 +83,15 @@ def run_mk_output_dir(input=None, output=None, params=None):
 @collate(sickle_file_list, regex(r".*/(M[NT]..)_(R.)\.fastq.gz"),
          [r"%s/\1_R1.fastq.gz" % config['sickle_params']['output_dir'],
           r"%s/\1_R2.fastq.gz" % config['sickle_params']['output_dir']],
-         r"%s/\1.singles" % config['sickle_params']['output_dir'])
+         r"%s/\1.singles" % config['sickle_params']['output_dir'],
+         config['sickle_params'])
 def run_sickle(input, output, output_singles, params=None):
     """Run sickle to trim ends of reads based on sequence quality and length.
     
     Also gzips the output to save space.
     
     """
-
-    # Update input and output from global config object
-    params = config['sickle_params']
-
+    
     input = sorted(input)
     params['input_read1'] = input[0]
     params['input_read2'] = input[1]
@@ -127,14 +125,13 @@ def run_sickle(input, output, output_singles, params=None):
          mkdir(config['bwa_aln_params']['output_dir']))
 @collate(sickle_outputs,
          regex(r".*/(.*).fastq.gz"), 
-         r"%s/\1.sai" % config['bwa_aln_params']['output_dir'])
+         r"%s/\1.sai" % config['bwa_aln_params']['output_dir'],
+         config['bwa_aln_params'])
 def run_bwa_aln(input, output, params=None):
     """Run bwa on individual gzipped fastq files.
 
     """
     
-    # Update input and output from global config object
-    params = config['bwa_aln_params']
     params['input'] = " ".join(input)
     params['output'] = output
     
@@ -162,15 +159,13 @@ def run_bwa_aln(input, output, params=None):
          r"%s/\1.sorted.bam" % config['bwa_sampe_params']['output_dir'],
          r"\1.sorted",
          r"\1",
+         config['bwa_sampe_params']
          )
 def run_bwa_sampe(input, output, output_prefix, sample_name, params=None):
     """Run bwa sampe.
 
 
     """
-    
-    # Update input and output from global config object
-    params = config['bwa_sampe_params']
     
     params['sai_R1'] = input[0][0]
     params['sai_R2'] = input[1][0]
@@ -201,20 +196,19 @@ def run_bwa_sampe(input, output, output_prefix, sample_name, params=None):
 
 @follows(run_bwa_sampe,
          mkdir(config['bamfilter_params']['output_dir']))
-@transform(run_bwa_sampe, regex(r"(.*).bam"), r"\1.filter.bam")
+@transform(run_bwa_sampe, 
+           regex(r"(.*).bam"), r"\1.filter.bam",
+           config['bamfilter_params'])
 def run_filterbam(input, output):
     """
     
     """
-
-    # Update input and output from global config object
-    params = config['bamfilter_params']
-
+    
     params['input'] = input
     params['output'] = output
     
     cmd = "module load %(modules)s\n" % params
-    cmd = "samtools view -h -F uUfd -q 1 -b %(input)s > %(output)s" % params
+    cmd += "samtools view -h -F uUfd -q 1 -b %(input)s > %(output)s" % params
     
     logger.debug("cmd = %s" % (cmd))
     
@@ -228,14 +222,14 @@ def run_filterbam(input, output):
     
     logger.debug("job_id = %s" % (job_id,))
 
-@transform(run_filterbam, regex(r"(.*).bam"), r"\1.bam.bai")
+@transform(run_filterbam, 
+           regex(r"(.*).bam"), r"\1.bam.bai",
+           config['bamindex_params'])
 def run_indexbam1(input, output, params=None):
     """Run samtools index on bam file.
     
     """
-        
-    # Update input and output from global config object
-    params = config['bamindex_params']
+    
     params['input'] = input
     params['output'] = output
 
@@ -243,7 +237,8 @@ def run_indexbam1(input, output, params=None):
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "samtools index %(input)s %(output)s" % params
+    cmd = "module load %(modules)s\n" % params
+    cmd += "samtools index %(input)s %(output)s" % params
 
     job_id = utils.safe_qsub_run(cmd, jobname="bamindex1",
                                  nodes=params['qsub_nodes'],
@@ -252,13 +247,13 @@ def run_indexbam1(input, output, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 @follows(run_indexbam1)
-@transform(run_filterbam, regex(r"(.*).sorted.filter.bam"), r"\1.bam")
+@transform(run_filterbam,
+           regex(r"(.*).sorted.filter.bam"), r"\1.bam",
+           config['cleansam_params'])
 def run_cleansam(input, output):
     """Clean up BAM file.
     """
-
-    # Update input and output from global config object
-    params = config['cleansam_params']
+    
     params['input'] = input
     params['output'] = output
 
@@ -274,18 +269,14 @@ def run_cleansam(input, output):
     
     logger.debug("job_id = %s" % (job_id,))
 
-@transform(run_cleansam, regex(r"(.*).bam"), r"\1.bam.bai")
+@transform(run_cleansam,
+           regex(r"(.*).bam"), r"\1.bam.bai",
+           config['bamindex_params'])
 def run_indexbam2(input, output, params=None):
     """Run samtools index on bam file.
     
     """
-
-
-    # Let a parser argument handle setting up arguments and options
-    parser = argparse.ArgumentParser()
-        
-    # Update input and output from global config object
-    params = config['bamindex_params']
+    
     params['input'] = input
     params['output'] = output
 
@@ -293,7 +284,8 @@ def run_indexbam2(input, output, params=None):
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "samtools index %(input)s %(output)s" % params
+    cmd = "module load %(modules)s\n" % params
+    cmd += "samtools index %(input)s %(output)s" % params
 
     job_id = utils.safe_qsub_run(cmd, jobname="bamindex2",
                                  nodes=params['qsub_nodes'],
@@ -302,18 +294,14 @@ def run_indexbam2(input, output, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 @follows(run_indexbam2)
-@transform(run_cleansam, regex(r"(.*).bam"), r"\1.flagstat.txt")
+@transform(run_cleansam,
+           regex(r"(.*).bam"), r"\1.flagstat.txt",
+           config['bamflagstat_params'])
 def run_flagstat(input, output, params=None):
     """Run samtools flagstat on bam file.
     
     """
-
-
-    # Let a parser argument handle setting up arguments and options
-    parser = argparse.ArgumentParser()
-        
-    # Update input and output from global config object
-    params = config['bamflagstat_params']
+    
     params['input'] = input
     params['output'] = output
 
@@ -321,7 +309,8 @@ def run_flagstat(input, output, params=None):
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "samtools flagstat %(input)s > %(output)s" % params
+    cmd = "module load %(modules)s\n" % params
+    cmd += "samtools flagstat %(input)s > %(output)s" % params
 
     job_id = utils.safe_qsub_run(cmd, jobname="flagstat",
                                  nodes=params['qsub_nodes'],
@@ -350,9 +339,10 @@ def run_mark_duplicates(input, output, params=None):
     params['output'] = output
     params['metrics_file'] = "%s.metrics" % output
 
-    cmd = ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
-           "INPUT=%(input)s OUTPUT=%(output)s METRICS_FILE=%(metrics_file)s " 
-           "OPTICAL_DUPLICATE_PIXEL_DISTANCE=%(optical_duplicate_pixel_distance)s" % params)
+    cmd = "module load %(modules)s\n" % params
+    cmd += ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
+            "INPUT=%(input)s OUTPUT=%(output)s METRICS_FILE=%(metrics_file)s " 
+            "OPTICAL_DUPLICATE_PIXEL_DISTANCE=%(optical_duplicate_pixel_distance)s" % params)
     
     job_id = utils.safe_qsub_run(cmd, jobname="markdups",
                                  nodes=picard_params['qsub_nodes'],
@@ -363,39 +353,191 @@ def run_mark_duplicates(input, output, params=None):
 
 
 @jobs_limit(20)
-@follows(run_indexbam2, mkdir(config['mergebam_params']['output_dir']))
-@collate(run_cleansam, regex(r".*/M.(.+).bam"), r"%s/\1.bam" % config['mergebam_params']['output_dir'],
-         r"\1")
-def run_mergebam(input, output, patient_id=None):
+@follows(run_mark_duplicates, mkdir(config['mergebam_params']['output_dir']))
+@collate(run_mark_duplicates, 
+         regex(r".*/M.(.+).bam"), 
+         r"%s/\1.bam" % config['mergebam_params']['output_dir'],
+         r"\1",
+         config['mergebam_params'])
+def run_mergebam(input, output, patient_id=None, params=None):
     """Merge all bam files for a single patient together (this includes matched tumor and normal into one file).
     The separate tumor/normal sample info is encoded in the read groups of the BAM files.
     This is done for future steps (GATK recommends that tumor/normal paired data is run through re-align/re-calibrate step together).
     """
     
-    params = dict(patient_id=patient_id)
         
     # Update input and output from global config object
-    mergebam_params = config['mergebam_params']
-    mergebam_params['input'] = " ".join(input)
-    mergebam_params['output'] = output
+    params['patient_id'] = patient_id
+    params['input'] = " ".join(input)
+    params['output'] = output
 
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmdline = "--maxjheap=%(maxjheap)s --jar=%(jar_file)s --input %(input)s --output=%(output)s --sort_order=%(sort_order)s MergeSamFiles --use_threading=true" % mergebam_params
+    cmd = "module load %(modules)s\n" % params
+    cmd += ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
+            "INPUT=%(input)s OUTPUT=%(output)s SORT_ORDER=%(sort_order)s USE_THREADING=true " % params)
 
-    cmd = "python -m ccrngspy.tasks.Picard %s" % cmdline
+    # cmdline = "--maxjheap=%(maxjheap)s --jar=%(jar_file)s --input %(input)s --output=%(output)s --sort_order=%(sort_order)s MergeSamFiles --use_threading=true" % mergebam_params
+    # cmd = "python -m ccrngspy.tasks.Picard %s" % cmdline
+
     logger.debug("cmd = %s" % (cmd,))
 
     job_id = utils.safe_qsub_run(cmd, jobname="mergebam%s" % (params['patient_id']),
-                                 nodes=mergebam_params['qsub_nodes'],
+                                 nodes=params['qsub_nodes'],
                                  stdout=stdout, stderr=stderr)
     
     logger.debug("job_id = %s" % (job_id,))
 
 
-job_list = [run_mk_output_dir, run_bwa_aln, run_bwa_sampe, run_indexbam1, run_cleansam, run_flagstat]
+@jobs_limit(20)
+@follows(run_mk_output_dir,
+         mkdir(config['gatk_params']['output_dir']),
+         mkdir(config['gatk_realigner_target_creator_params']['output_dir']))
+@files(config['gatk_realigner_target_creator_params']['reference_fasta'], 
+       config['gatk_realigner_target_creator_params']['output_file'],
+       config['gatk_realigner_target_creator_params'])
+def run_realign_indel_creator(input, output, params=None):
+    """First part of GATK recalibration.
+
+    """
+
+    realign_params['input'] = input
+    realign_params['output'] = output
+
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    knowns = ""
+    for known in config['gatk_realigner_target_creator_params']['known_files']:
+        knowns += "--known %s " % known
+
+    realign_params['knowns'] = knowns
+    
+    cmd = "module load %(modules)s\n" % params
+    cmd += ("java -Xmx%(maxjheap)s -jar %(jar_file)s -nt %(threads)s "
+            "-R %(reference_fasta)s -T RealignerTargetCreator "
+            "-o %(output)s %(knowns)s" % realign_params)
+
+    job_id = utils.safe_qsub_run(cmd, jobname="realignTC",
+                                 nodes=realign_params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+@jobs_limit(20)
+@follows(run_indexbam, run_realign_indel_creator, 
+         mkdir(config['gatk_indel_realigner_params']['output_dir']))
+@transform(run_mark_duplicates,
+           regex(r".*/(.*).bam"), 
+           r"%s/\1.bam" % config['gatk_indel_realigner_params']['output_dir'],
+           config['gatk_indel_realigner_params'])
+def run_indel_realigner(input, output, params=None):
+    """Second part of GATK recalibration.
+
+    """
+
+    params['input'] = input
+    params['output'] = output
+
+    knowns = ""
+    for known in config['gatk_realigner_target_creator_params']['known_files']:
+        knowns += "-known %s " % known
+
+    params['knowns'] = knowns
+    params['target_intervals'] = config['gatk_realigner_target_creator_params']['output_file']
+    
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    cmd = "module load %(modules)s\n" % params
+    cmd += ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s -I %(input)s "
+            "-R %(reference_fasta)s -T IndelRealigner -targetIntervals %(target_intervals)s "
+            "-o %(output)s %(knowns)s --consensusDeterminationModel KNOWNS_ONLY -LOD 0.4" % params)
+    
+    logger.debug("cmd = %s" % (cmd,))
+
+    job_id = utils.safe_qsub_run(cmd, jobname="indelRe",
+                                 nodes=params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+@jobs_limit(20)
+@follows(run_indel_realigner, mkdir(config['gatk_base_score_recal_params']['output_dir']))
+@transform(run_indel_realigner, regex(r".*/(.*).bam"), r"%s/\1.grp" % config['gatk_base_score_recal_params']['output_dir'])
+def run_base_score_recalibrator(input, output, params=None):
+    """GATK base score recalibration.
+
+    """
+    
+    realign_params = config['gatk_base_score_recal_params']
+    realign_params['input'] = input
+    realign_params['output'] = output
+
+    knowns = ""
+    for known in config['gatk_base_score_recal_params']['known_files']:
+        knowns += "-knownSites %s " % known
+
+    realign_params['knowns'] = knowns
+    
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    cmd = "java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s -T BaseRecalibrator -I %(input)s -R %(reference_fasta)s -o %(output)s %(knowns)s" % realign_params
+
+    logger.debug("cmd = %s" % (cmd,))
+
+    job_id = utils.safe_qsub_run(cmd, jobname="bsRecal",
+                                 nodes=realign_params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+@jobs_limit(20)
+@follows(run_base_score_recalibrator)
+@transform(run_indel_realigner, 
+           regex(r".*/(.*).bam"), 
+           r"%s/\1.bam" % config['gatk_base_score_recal_params']['output_dir'], 
+           r"%s/\1.grp" % config['gatk_base_score_recal_params']['output_dir'])
+def run_write_recalibrated_bam(input, output, bqsr_file, params=None):
+    """GATK write BAM file with recalibrated base scores.
+
+    """
+    
+    recal_params = config['gatk_base_score_recal_params']
+    recal_params['input'] = input
+    recal_params['output'] = output
+    recal_params['bqsr_file'] = bqsr_file
+    
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    cmd = "java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s -T PrintReads -I %(input)s -R %(reference_fasta)s -BQSR %(bqsr_file)s -o %(output)s" % recal_params
+
+    logger.debug("cmd = %s" % (cmd,))
+
+    job_id = utils.safe_qsub_run(cmd, jobname="writerecal",
+                                 nodes=recal_params['qsub_nodes'],
+                                 # params=recal_params['qsub_params'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+
+job_list = [run_mk_output_dir,
+            run_bwa_aln,
+            run_bwa_sampe,
+            run_indexbam1,
+            run_cleansam,
+            run_flagstat,
+            run_mark_duplicates,
+            run_mergebam]
 
 def run_it():
     """Run the pipeline.
