@@ -157,7 +157,7 @@ def run_bwa_aln(input, output, params=None):
          add_inputs([r"%s/\1_R1.fastq.gz" % config['sickle_params']['output_dir'],
                      r"%s/\1_R2.fastq.gz" % config['sickle_params']['output_dir']]),
          r"%s/\1.sorted.bam" % config['bwa_sampe_params']['output_dir'],
-         r"\1.sorted",
+         r"%s/\1.sorted" % config['bwa_sampe_params']['output_dir'],
          r"\1",
          config['bwa_sampe_params']
          )
@@ -180,7 +180,7 @@ def run_bwa_sampe(input, output, output_prefix, sample_name, params=None):
     cmd = "module load %(modules)s\n" % params
     cmd = ('bwa sampe -r "%(read_group_string)s" %(reference_fasta)s %(sai_R1)s %(sai_R2)s %(fastq_R1)s %(fastq_R2)s | '
            'samtools view -Su - | '
-           'samtools sort - -@ %(threads)s -f %(output)s' % params)
+           'samtools sort - -@ %(threads)s %(output)s' % params)
     
     logger.debug("cmd = %s" % (cmd))
     
@@ -199,7 +199,7 @@ def run_bwa_sampe(input, output, output_prefix, sample_name, params=None):
 @transform(run_bwa_sampe, 
            regex(r"(.*).bam"), r"\1.filter.bam",
            config['bamfilter_params'])
-def run_filterbam(input, output):
+def run_filterbam(input, output, params=None):
     """
     
     """
@@ -250,7 +250,7 @@ def run_indexbam1(input, output, params=None):
 @transform(run_filterbam,
            regex(r"(.*).sorted.filter.bam"), r"\1.bam",
            config['cleansam_params'])
-def run_cleansam(input, output):
+def run_cleansam(input, output, params=None):
     """Clean up BAM file.
     """
     
@@ -349,7 +349,7 @@ def run_mark_duplicates(input, output, params=None):
             "OPTICAL_DUPLICATE_PIXEL_DISTANCE=%(optical_duplicate_pixel_distance)s" % params)
     
     job_id = utils.safe_qsub_run(cmd, jobname="markdups",
-                                 nodes=picard_params['qsub_nodes'],
+                                 nodes=params['qsub_nodes'],
                                  stdout=stdout, stderr=stderr)
     
     logger.debug("job_id = %s" % (job_id,))
@@ -433,9 +433,9 @@ def run_realign_indel_creator(input, output, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 @jobs_limit(20)
-@follows(run_indexbam, run_realign_indel_creator, 
+@follows(run_mergebam, run_realign_indel_creator, 
          mkdir(config['gatk_indel_realigner_params']['output_dir']))
-@transform(run_mark_duplicates,
+@transform(run_mergebam,
            regex(r".*/(.*).bam"), 
            r"%s/\1.bam" % config['gatk_indel_realigner_params']['output_dir'],
            config['gatk_indel_realigner_params'])
@@ -472,7 +472,8 @@ def run_indel_realigner(input, output, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 @jobs_limit(20)
-@follows(run_indel_realigner, mkdir(config['gatk_base_score_recal_params']['output_dir']))
+@follows(run_indel_realigner, 
+         mkdir(config['gatk_base_score_recal_params']['output_dir']))
 @transform(run_indel_realigner, 
            regex(r".*/(.*).bam"), 
            r"%s/\1.grp" % config['gatk_base_score_recal_params']['output_dir'],
@@ -542,14 +543,16 @@ def run_write_recalibrated_bam(input, output, bqsr_file, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 
-job_list = [run_mk_output_dir,
-            run_bwa_aln,
-            run_bwa_sampe,
-            run_indexbam1,
-            run_cleansam,
-            run_flagstat,
-            run_mark_duplicates,
-            run_mergebam]
+# job_list = [run_mk_output_dir,
+#             run_bwa_aln,
+#             run_bwa_sampe,
+#             run_indexbam1,
+#             run_cleansam,
+#             run_flagstat,
+#             run_mark_duplicates,
+#             run_mergebam]
+
+job_list = [run_write_recalibrated_bam]
 
 def run_it():
     """Run the pipeline.
