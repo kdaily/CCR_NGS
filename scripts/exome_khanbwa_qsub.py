@@ -372,7 +372,12 @@ def run_mergebam(input, output, patient_id=None, params=None):
         
     # Update input and output from global config object
     params['patient_id'] = patient_id
-    params['input'] = " ".join(input)
+
+    # Add input files
+    params['inputs'] = ""
+    for filename in input:
+        params['inputs'] += "INPUT=%s " % filename
+
     params['output'] = output
 
     # Output dir for qsub stdout and stderr
@@ -381,7 +386,7 @@ def run_mergebam(input, output, patient_id=None, params=None):
 
     cmd = "module load %(modules)s\n" % params
     cmd += ("java -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s "
-            "INPUT=%(input)s OUTPUT=%(output)s SORT_ORDER=%(sort_order)s "
+            "%(inputs)s OUTPUT=%(output)s SORT_ORDER=%(sort_order)s "
             "USE_THREADING=true CREATE_INDEX=true" % params)
 
     # cmdline = "--maxjheap=%(maxjheap)s --jar=%(jar_file)s --input %(input)s --output=%(output)s --sort_order=%(sort_order)s MergeSamFiles --use_threading=true" % mergebam_params
