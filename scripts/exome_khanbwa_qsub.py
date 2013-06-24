@@ -413,8 +413,8 @@ def run_realign_indel_creator(input, output, params=None):
 
     """
 
-    realign_params['input'] = input
-    realign_params['output'] = output
+    params['input'] = input
+    params['output'] = output
 
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['stdout_log_file_dir']
@@ -424,15 +424,15 @@ def run_realign_indel_creator(input, output, params=None):
     for known in config['gatk_realigner_target_creator_params']['known_files']:
         knowns += "--known %s " % known
 
-    realign_params['knowns'] = knowns
+    params['knowns'] = knowns
     
     cmd = "module load %(modules)s\n" % params
     cmd += ("java -Xmx%(maxjheap)s -jar %(jar_file)s -nt %(threads)s "
             "-R %(reference_fasta)s -T RealignerTargetCreator "
-            "-o %(output)s %(knowns)s" % realign_params)
+            "-o %(output)s %(knowns)s" % params)
 
     job_id = utils.safe_qsub_run(cmd, jobname="realignTC",
-                                 nodes=realign_params['qsub_nodes'],
+                                 nodes=params['qsub_nodes'],
                                  stdout=stdout, stderr=stderr)
     
     logger.debug("job_id = %s" % (job_id,))
@@ -495,7 +495,7 @@ def run_base_score_recalibrator(input, output, params=None):
     for known in params['known_files']: # config['gatk_base_score_recal_params']['known_files']:
         knowns += "-knownSites %s " % known
 
-    realign_params['knowns'] = knowns
+    params['knowns'] = knowns
     
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['stdout_log_file_dir']
