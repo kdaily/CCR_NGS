@@ -38,8 +38,11 @@ parser.add_argument('--config_file', dest="config_file", type=str,
 parser.add_argument('--verbose', type=int, default=3,
                     help="Verbosity when using print only mode.")
 
-parser.add_argument('--sample_file', dest="sample_file", type=str,
+parser.add_argument('--sample_file', dest="sample_file", type=str, default=None,
                     help="A tab separated file about the samples to run.")
+
+parser.add_argument('--run_till', type=str, default=None,
+                    help="Last task to run.")
 
 parser.add_argument("--print_only", dest="print_only", action="store_true", default=False,
                     help="Don't run the pipeline, just print what will be run.")
@@ -52,6 +55,11 @@ with open(opts.config_file, 'r') as configfile:
     config = yaml.load(configfile)
 
 # Load the samples tab-separated file
+if opts.sample_file:
+    logger.warn("Sample file provided on command line; will override one provided in the config file")
+else:
+    opts.sample_file = config['general_params']['sample_file']
+
 with open(opts.sample_file, 'r') as samplefile:
     reader = csv.DictReader(samplefile, delimiter="\t")
     samples = list(reader)
@@ -156,31 +164,29 @@ def run_bwa_aln(input, output, params=None):
          regex(r".*/(.*)_(.*).sai"), 
          add_inputs([r"%s/\1_R1.fastq.gz" % config['sickle_params']['output_dir'],
                      r"%s/\1_R2.fastq.gz" % config['sickle_params']['output_dir']]),
-         r"%s/\1.sorted.bam" % config['bwa_sampe_params']['output_dir'],
-         r"%s/\1.sorted" % config['bwa_sampe_params']['output_dir'],
+         r"%s/\1.original.bam" % config['bwa_sampe_params']['output_dir'],
          r"\1",
          config['bwa_sampe_params']
          )
-def run_bwa_sampe(input, output, output_prefix, sample_name, params=None):
+def run_bwa_sampe(input, output, sample_name, params=None):
     """Run bwa sampe.
 
 
     """
-    
+
+    params['output'] = output
     params['sai_R1'] = input[0][0]
     params['sai_R2'] = input[1][0]
 
     # For some reason, -f param didn't work with samtools sort
     # So, need to use prefix verison (without bam suffix)
-    params['output'] = output_prefix
     
     (params['fastq_R1'], params['fastq_R2']) = input[0][1]
         
     params['read_group_string'] = bwa_helpers.sample_name_to_read_group_string(sample_name=sample_name, samples=samples, config=config)
     cmd = "module load %(modules)s\n" % params
     cmd = ('bwa sampe -r "%(read_group_string)s" %(reference_fasta)s %(sai_R1)s %(sai_R2)s %(fastq_R1)s %(fastq_R2)s | '
-           'samtools view -Su - | '
-           'samtools sort - -@ %(threads)s %(output)s' % params)
+           'samtools view -Sb - > %(output)s' % params)
     
     logger.debug("cmd = %s" % (cmd))
     
@@ -195,9 +201,41 @@ def run_bwa_sampe(input, output, output_prefix, sample_name, params=None):
     logger.debug("job_id = %s" % (job_id,))
 
 @follows(run_bwa_sampe,
-         mkdir(config['bamfilter_params']['output_dir']))
+         mkdir(config['bamsort_params']['output_dir']))
 @transform(run_bwa_sampe, 
-           regex(r"(.*).bam"), r"\1.filter.bam",
+           regex(r"(.*).original.bam"), 
+           r"\1.sorted.bam",
+           r"\1.sorted",
+           config['bamsort_params'])
+def run_sortbam(input, output, output_prefix, params=None):
+    """Sort bam file.
+
+
+    """
+    
+    params['input'] = input
+    params['output'] = output_prefix
+    
+    cmd = "module load %(modules)s\n" % params
+    cmd = ('samtools sort -m 500M -@ %(threads)s %(input)s %(output)s' % params)
+    
+    logger.debug("cmd = %s" % (cmd))
+    
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+    
+    job_id = utils.safe_qsub_run(cmd, jobname="sortbam",
+                                 nodes=params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+
+@follows(run_sortbam,
+         mkdir(config['bamfilter_params']['output_dir']))
+@transform(run_sortbam, 
+           regex(r"(.*).sorted.bam"), r"\1.filter.bam",
            config['bamfilter_params'])
 def run_filterbam(input, output, params=None):
     """
@@ -248,7 +286,7 @@ def run_indexbam1(input, output, params=None):
 
 @follows(run_indexbam1)
 @transform(run_filterbam,
-           regex(r"(.*).sorted.filter.bam"), r"\1.bam",
+           regex(r"(.*).filter.bam"), r"\1.bam",
            config['cleansam_params'])
 def run_cleansam(input, output, params=None):
     """Clean up BAM file.
@@ -547,6 +585,105 @@ def run_write_recalibrated_bam(input, output, bqsr_file, params=None):
     
     logger.debug("job_id = %s" % (job_id,))
 
+@jobs_limit(20)
+# # Can I do this?
+@split(run_write_recalibrated_bam, regex(r".*/(.+).bam"),
+       [r'%s/MN\1.bam' % config['split_bam_params']['output_dir'],
+        r'%s/MT\1.bam' % config['split_bam_params']['output_dir']],
+       config['split_bam_params'])
+def run_split_bam(input, output, params=None):
+    """Split BAM files into separate tumor/normal files based on read group.
+
+    """
+
+    params['input'] = input
+    ## params['output_dir'] = config['gatk_base_score_recal_params']['output_dir']
+
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    cmd = '%(exec)s %(input)s --output_dir=%(output_dir)s ' % params
+    cmd += '--output_file_expr="%(SM)s.bam"'
+
+    logger.debug("cmd = %s" % (cmd,))
+
+    job_id = utils.safe_qsub_run(cmd, jobname="splitbam",
+                                 nodes=params['qsub_nodes'],
+                                 # params=params['qsub_params'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+@jobs_limit(20)
+@transform(run_split_bam,
+           suffix(".bam"),
+           ".bai",
+           config['bamindex_params'])
+def run_index_splitbam(input, output, params=None):
+    """Run samtools index on bam file.
+    
+    """
+
+        
+    # Update input and output from global config object
+    params['input'] = input
+    params['output'] = output
+
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    cmd = "module load %(modules)s\n" % params
+    cmd += "samtools index %(input)s %(output)s" % params
+
+    job_id = utils.safe_qsub_run(cmd, jobname="splitbamindex",
+                                 nodes=params['qsub_nodes'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
+
+@jobs_limit(5)
+@follows(run_index_splitbam, mkdir(config['mutect_params']['output_dir']))
+@collate(run_split_bam, 
+         regex(r".*/(M[NT])(.*)\.bam"),
+         r"%s/\2.vcf" % config['mutect_params']['output_dir'],
+         r"%s/\2.txt" % config['mutect_params']['output_dir'],
+         config['mutect_params'])
+def run_mutect(input, output, text_file, params=None):
+    """Run mutect.
+
+    """
+
+    assert len(input) == 2, "Not the right number of input files (should be 2, received %i)" % len(input)
+    
+    # Figure out which file is normal, which is tumor...should be alphabetical?
+    input = sorted(input)
+    params['input_normal'] = input[0]
+    params['input_tumor'] = input[1]
+
+    params['vcf_file'] = output
+    params['call_stats_file'] = text_file
+    ## params['coverage_file'] = coverage_file
+
+    params['log_file'] =  config['mutect_params']['output_dir']
+
+    # Output dir for qsub stdout and stderr
+    stdout = config['general_params']['stdout_log_file_dir']
+    stderr = config['general_params']['stderr_log_file_dir']
+
+    cmd = "%(java_exec)s -Xmx%(maxjheap)s -Djava.io.tmpdir=%(tmp_dir)s -jar %(jar_file)s --analysis_type MuTect --dbsnp %(dbsnp_file)s --cosmic %(cosmic_file)s --input_file:normal %(input_normal)s --input_file:tumor %(input_tumor)s --reference_sequence %(reference_fasta)s --out %(call_stats_file)s --vcf %(vcf_file)s --enable_extended_output" % params
+
+    logger.debug("cmd = %s" % (cmd,))
+
+    job_id = utils.safe_qsub_run(cmd, jobname="mutect",
+                                 nodes=params['qsub_nodes'],
+                                 params=params['qsub_params'],
+                                 stdout=stdout, stderr=stderr)
+    
+    logger.debug("job_id = %s" % (job_id,))
+
 
 # job_list = [run_mk_output_dir,
 #             run_bwa_aln,
@@ -557,7 +694,11 @@ def run_write_recalibrated_bam(input, output, bqsr_file, params=None):
 #             run_mark_duplicates,
 #             run_mergebam]
 
-job_list = [run_write_recalibrated_bam]
+if opts.run_till:
+    logger.debug("Running from %s" % opts.run_till)
+    job_list = [eval(opts.run_till)]
+else:
+    job_list = [run_mutect]
 
 def run_it():
     """Run the pipeline.
