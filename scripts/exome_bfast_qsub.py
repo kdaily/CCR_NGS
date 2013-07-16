@@ -126,8 +126,9 @@ def run_sickle(input, output, params=None):
 
     cmd = ("module load %(modules)s\n"
            "%(exec)s pe -t sanger -l %(length)s -q %(quality)s -f %(input_read1)s -r %(input_read2)s -o %(output_read1)s -p %(output_read2)s -s %(output_singles)s\n"
-           "gzip %(output_read1)s\n" 
-           "gzip %(output_read2)s" % params)
+           "gzip %(output_read1)s &\n" 
+           "gzip %(output_read2)s &\n" 
+           "wait" % params)
     
     logger.debug("cmd = %s" % (cmd,))
     
