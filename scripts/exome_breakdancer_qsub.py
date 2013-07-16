@@ -65,8 +65,10 @@ with open(opts.sample_file, 'r') as samplefile:
 
 
 ## Only this sample should run
-runthesesamples = ['MN23', 'MT23', 'MN22', 'MT22', 'MN21', 'MT21', 'MN20', 'MT20', 'MN19', 'MT19']
+runthesesamples = config['general_params']['samples_to_run'] 
 samples = [x for x in samples if x['sample_name'] in runthesesamples]
+
+print samples
     
 # setup inital run params
 bam_file_list = [os.path.join(config['general_params']['bam_input_dir'], x['filename']) for x in samples]
@@ -81,16 +83,19 @@ def run_mk_output_dir(input=None, output=None, params=None):
     pass
 
 @jobs_limit(40)
-@follows(run_mk_output_dir, mkdir(config['bam2cfg_params']['output_dir']))
-@transform(bam_file_list, regex(r".*/(.*).bam"), r"%s/\1.cfg" % config['bam2cfg_params']['output_dir'])
+@follows(run_mk_output_dir, 
+         mkdir(config['bam2cfg_params']['output_dir']))
+@transform(bam_file_list, 
+           regex(r".*/(.*).bam"), 
+           r"%s/\1.cfg" % config['bam2cfg_params']['output_dir'],
+           config['bam2cfg_params']
+           )
 def run_bam2cfg(input, output, params=None):
     """Create breakdancer config files.
     
     """
 
     # Update input and output from global config object
-    params = config['bam2cfg_params']
-
     params['input'] = input
     params['output'] = output
 
@@ -98,7 +103,8 @@ def run_bam2cfg(input, output, params=None):
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "%(exec)s %(input)s > %(output)s" % params
+    cmd = "module load %(modules)s\n" % params
+    cmd += "%(exec)s -g -h %(input)s > %(output)s" % params
     
     logger.debug("cmd = %s" % (cmd,))
 
@@ -110,24 +116,28 @@ def run_bam2cfg(input, output, params=None):
 
 @jobs_limit(40)
 @follows(run_bam2cfg, mkdir(config['breakdancer_params']['output_dir']))
-@transform(run_bam2cfg, regex(r".*/(.*).cfg"), r"%s/\1.txt" % config['breakdancer_params']['output_dir'], r"%s/\1.bed" % config['breakdancer_params']['output_dir'])
-def run_breakdancer(input, output, bedfile, params=None):
+@transform(run_bam2cfg, 
+           regex(r".*/(.*).cfg"), 
+           r"%s/\1.txt" % config['breakdancer_params']['output_dir'], 
+           r"%s/\1.bed" % config['breakdancer_params']['output_dir'],
+           r"%s/\1.fastq" % config['breakdancer_params']['output_dir'],
+           config['breakdancer_params'])
+def run_breakdancer(input, output, bedfile, fastqfile, params=None):
     """Run breakdancer, only to find intra-chromosomal structural variations (-t param).
     
     """
 
-    # Update input and output from global config object
-    params = config['breakdancer_params']
-
     params['input'] = input
     params['output'] = output
     params['bedfile'] = bedfile
+    params['fastqfile'] = fastqfile
 
     # Output dir for qsub stdout and stderr
     stdout = config['general_params']['stdout_log_file_dir']
     stderr = config['general_params']['stderr_log_file_dir']
 
-    cmd = "%(exec)s -g %(bedfile)s -t %(input)s > %(output)s" % params
+    cmd = "module load %(modules)s\n" % params
+    cmd += "%(exec)s -g %(bedfile)s -d %(fastqfile)s %(transchrom)s -r %(min_reads)s %(input)s > %(output)s" % params
     
     logger.debug("cmd = %s" % (cmd,))
 
